@@ -98,6 +98,12 @@ export default function SalidasPage() {
     loadData();
   }, [loadData]);
 
+  // Si se llega desde Código de Barras, el producto viene en la dirección (?producto=ID)
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('producto');
+    if (id) setForm((prev) => ({ ...prev, producto_id: id }));
+  }, []);
+
   const productName = useMemo(() => new Map(products.map((p) => [p.id, p.nombre])), [products]);
 
   const setField = (key: keyof FormState, value: string) =>

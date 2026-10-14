@@ -11,7 +11,7 @@ import {
 import { Package, AlertTriangle, Ban, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 
 /* ---------- Tipos de las filas que pedimos a Supabase ---------- */
-type ProductRow = Pick<Product, 'categoria_id' | 'stock' | 'stock_minimo'>;
+type ProductRow = Pick<Product, 'categoria_id' | 'stock' | 'stock_minimo' | 'habilitado'>;
 // Tabla "movimientos": registro unificado (panel + pedidos web)
 type MovementRow = { tipo: string; cantidad: number; created_at: string };
 type CategoryRow = { id: string; nombre: string };
@@ -119,7 +119,7 @@ export default function DashboardPage() {
 
         // Tres consultas en paralelo; los KPIs de "hoy" salen de la misma consulta de movimientos
         const [productsRes, categoriesRes, movementsRes] = await Promise.all([
-          supabase.from('productos').select('categoria_id, stock, stock_minimo'),
+          supabase.from('productos').select('categoria_id, stock, stock_minimo, habilitado'),
           supabase.from('categorias').select('id, nombre'),
           supabase.from('movimientos').select('tipo, cantidad, created_at').gte('created_at', start.toISOString()),
         ]);
@@ -127,7 +127,8 @@ export default function DashboardPage() {
         const failed = productsRes.error ?? categoriesRes.error ?? movementsRes.error;
         if (failed) throw failed;
 
-        const products = (productsRes.data ?? []) as ProductRow[];
+        // Los productos deshabilitados no cuentan en los KPIs ni en la distribución
+        const products = ((productsRes.data ?? []) as ProductRow[]).filter((p) => p.habilitado !== false);
         const categories = (categoriesRes.data ?? []) as CategoryRow[];
         const movements = (movementsRes.data ?? []) as MovementRow[];
 

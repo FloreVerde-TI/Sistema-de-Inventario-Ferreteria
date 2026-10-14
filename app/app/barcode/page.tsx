@@ -6,17 +6,41 @@ import type { Html5Qrcode } from 'html5-qrcode';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { Product, Category } from '@/types';
-import { ScanLine, Search, Package, ArrowDownCircle, ArrowUpCircle, X, Loader2 } from 'lucide-react';
+import { ScanLine, Search, Package, ArrowDownCircle, ArrowUpCircle, X, Loader2, Plus } from 'lucide-react';
 
 type ProductResult = Pick<
   Product,
-  'id' | 'sku' | 'codigo_barras' | 'nombre' | 'categoria_id' | 'stock' | 'stock_minimo' | 'ubicacion' | 'imagen_principal'
+  'id' | 'sku' | 'codigo_barras' | 'nombre' | 'categoria_id' | 'stock' | 'stock_minimo' | 'ubicacion' | 'imagen_principal' | 'habilitado'
 >;
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
 type StockStatus = 'normal' | 'low' | 'out';
 
 // Tarjeta blanca que se mantiene clara en modo oscuro (ver .card-light en globals.css)
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
+
+const PRODUCT_FIELDS =
+  'id, sku, codigo_barras, nombre, categoria_id, stock, stock_minimo, ubicacion, imagen_principal, habilitado';
+
+// Claves del navegador: la opción del desplegable y el último producto escaneado
+const LS_SHOW_LAST = 'barcode:mostrarUltimo';
+const LS_LAST_ID = 'barcode:ultimoProducto';
+
+function readStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string | null) {
+  try {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    // Sin acceso al almacenamiento del navegador: la pantalla funciona igual
+  }
+}
 
 function getStatus(stock?: number | null, min?: number | null): StockStatus {
   const s = stock ?? 0;
@@ -33,9 +57,11 @@ export default function BarcodePage() {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [code, setCode] = useState('');
   const [product, setProduct] = useState<ProductResult | null>(null);
+  const [showLast, setShowLast] = useState(true);
   const [searching, setSearching] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState<string | null>(null); // código que no existe en la BD
   const [imgError, setImgError] = useState(false);
 
   // Categorías, para mostrar el nombre en el resultado
@@ -45,6 +71,47 @@ export default function BarcodePage() {
       setCategories((data ?? []) as CategoryRow[]);
     }
     loadCategories();
+  }, []);
+
+  // Al entrar: lee la opción guardada y, si está en "Sí", vuelve a consultar el
+  // último producto escaneado (así el stock siempre sale actualizado)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreLast() {
+      const show = readStorage(LS_SHOW_LAST) !== '0';
+      setShowLast(show);
+      setError(null);
+
+      // Con "No", al volver la pantalla queda limpia
+      if (!show) {
+        setProduct(null);
+        return;
+      }
+
+      const id = readStorage(LS_LAST_ID);
+      if (!id) return;
+
+      const { data } = await supabase
+        .from('productos')
+        .select(PRODUCT_FIELDS)
+        .eq('id', id)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (data) {
+        setImgError(false);
+        setProduct(data as ProductResult); // reemplaza el resultado viejo por el stock actual
+      } else {
+        setProduct(null);
+        writeStorage(LS_LAST_ID, null); // el producto ya no existe
+      }
+    }
+
+    restoreLast();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Busca por código de barras o por código interno (SKU)
@@ -58,12 +125,13 @@ export default function BarcodePage() {
 
     setSearching(true);
     setError(null);
+    setNotFound(null);
     setProduct(null);
     setImgError(false);
 
     const { data, error: queryError } = await supabase
       .from('productos')
-      .select('id, sku, codigo_barras, nombre, categoria_id, stock, stock_minimo, ubicacion, imagen_principal')
+      .select(PRODUCT_FIELDS)
       .or(`codigo_barras.eq.${value},sku.eq.${value}`)
       .limit(1);
 
@@ -71,9 +139,11 @@ export default function BarcodePage() {
       console.error('Error buscando producto:', queryError);
       setError(`No se pudo realizar la búsqueda: ${queryError.message}`);
     } else if (!data || data.length === 0) {
-      setError(`No se encontró ningún producto con el código "${value}".`);
+      setNotFound(value);
     } else {
-      setProduct(data[0] as ProductResult);
+      const found = data[0] as ProductResult;
+      setProduct(found);
+      writeStorage(LS_LAST_ID, String(found.id)); // se recuerda como "último escaneado"
     }
     setSearching(false);
   }, []);
@@ -103,12 +173,32 @@ export default function BarcodePage() {
         const { Html5Qrcode: Scanner } = await import('html5-qrcode');
         if (cancelled) return;
 
-        scanner = new Scanner('reader');
+        // Solo formatos de ferretería/comercio: lee más rápido y con menos errores
+        const { Html5QrcodeSupportedFormats: F } = await import('html5-qrcode');
+        if (cancelled) return;
+
+        scanner = new Scanner('reader', {
+          verbose: false,
+          useBarCodeDetectorIfSupported: true, // usa el lector nativo del navegador si existe
+          formatsToSupport: [
+            F.QR_CODE,
+            F.CODE_128,
+            F.CODE_39,
+            F.EAN_13,
+            F.EAN_8,
+            F.UPC_A,
+            F.UPC_E,
+          ],
+        });
         let handled = false;
 
         await scanner.start(
           { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 260, height: 140 } },
+          {
+            fps: 10,
+            // Zona de lectura ancha (90% del ancho, 55% del alto del video)
+            qrbox: (w, h) => ({ width: Math.floor(w * 0.9), height: Math.floor(h * 0.55) }),
+          },
           (decodedText) => {
             if (handled) return;
             handled = true;
@@ -147,6 +237,18 @@ export default function BarcodePage() {
     inputRef.current?.focus();
   };
 
+  const handleShowLastChange = (value: boolean) => {
+    setShowLast(value);
+    writeStorage(LS_SHOW_LAST, value ? '1' : '0');
+  };
+
+  const handleClearResult = () => {
+    setProduct(null);
+    setNotFound(null);
+    setImgError(false);
+    writeStorage(LS_LAST_ID, null);
+  };
+
   const categoryName = product?.categoria_id
     ? categories.find((c) => c.id === product.categoria_id)?.nombre
     : undefined;
@@ -155,11 +257,28 @@ export default function BarcodePage() {
     <AdminLayout>
       <div className="space-y-6">
         {/* Encabezado */}
-        <div>
-          <h2 className="text-2xl font-bold text-text tracking-tight">Consulta por código de barras</h2>
-          <p className="text-text-muted text-sm">
-            Escanea o ingresa un código para ver la información del producto
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-text tracking-tight">Consulta por código de barras</h2>
+            <p className="text-text-muted text-sm">
+              Escanea o ingresa un código para ver la información del producto
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1 shrink-0">
+            <label htmlFor="show-last" className="text-xs font-semibold text-text-soft">
+              Mostrar último producto escaneado al volver
+            </label>
+            <select
+              id="show-last"
+              value={showLast ? 'si' : 'no'}
+              onChange={(e) => handleShowLastChange(e.target.value === 'si')}
+              className="w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text outline-none focus:ring-2 focus:ring-primary-light transition-all"
+            >
+              <option value="si">Sí</option>
+              <option value="no">No</option>
+            </select>
+          </div>
         </div>
 
         {/* Escáner */}
@@ -198,6 +317,7 @@ export default function BarcodePage() {
                     type="button"
                     onClick={() => {
                       setError(null);
+                      setNotFound(null);
                       setScanning(true);
                     }}
                     className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2"
@@ -222,9 +342,44 @@ export default function BarcodePage() {
           <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-4 text-sm">{error}</div>
         )}
 
+        {/* Código que no existe: ofrece registrarlo */}
+        {notFound && (
+          <div className={`${CARD} p-6 flex items-center justify-between gap-4`}>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-text break-words">
+                No se encontró ningún producto con el código «{notFound}».
+              </p>
+              <p className="text-sm text-text-muted mt-1">¿Registrar como nuevo producto?</p>
+            </div>
+            <div className="flex gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setNotFound(null)}
+                className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors"
+              >
+                Ahora no
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push(`/productos/nuevo?codigo=${encodeURIComponent(notFound)}`)}
+                className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center gap-2"
+              >
+                <Plus size={16} /> Registrar como nuevo producto
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Resultado */}
         {product && (
-          <div className={`${CARD} p-6 flex gap-6`}>
+          <div className={`${CARD} p-6 flex gap-6 relative`}>
+            <button
+              onClick={handleClearResult}
+              className="absolute top-4 right-4 px-2.5 py-1 text-xs font-medium text-text-soft bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-1"
+            >
+              <X size={14} /> Limpiar resultado
+            </button>
+
             <div className="w-40 h-40 shrink-0 rounded-xl bg-surface-alt border border-border flex items-center justify-center text-text-muted overflow-hidden">
               {product.imagen_principal && !imgError ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -240,7 +395,15 @@ export default function BarcodePage() {
             </div>
 
             <div className="flex-1 min-w-0">
-              <h3 className="text-xl font-bold text-text">{product.nombre}</h3>
+              <h3
+                className={`text-xl font-bold pr-40 ${
+                  product.habilitado === false
+                    ? 'text-text-muted line-through decoration-red-400 decoration-2'
+                    : 'text-text'
+                }`}
+              >
+                {product.nombre}
+              </h3>
               <p className="text-xs text-text-muted mb-5">
                 Código: {product.sku || '—'} · Barras: {product.codigo_barras || '—'}
               </p>
@@ -257,25 +420,36 @@ export default function BarcodePage() {
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">Estado</div>
                   <div className="mt-1">
-                    <StatusBadge status={getStatus(product.stock, product.stock_minimo)} />
+                    {product.habilitado === false ? (
+                      <DisabledBadge />
+                    ) : (
+                      <StatusBadge status={getStatus(product.stock, product.stock_minimo)} />
+                    )}
                   </div>
                 </div>
               </div>
 
               <div className="flex gap-3 mt-6">
                 <button
-                  onClick={() => router.push(`/entradas?producto=${product.id}`)}
-                  className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2"
+                  onClick={() => router.push(`/entradas?producto=${product.id}&desde=barcode`)}
+                  disabled={product.habilitado === false}
+                  className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ArrowDownCircle size={16} /> Registrar entrada
                 </button>
                 <button
-                  onClick={() => router.push(`/salidas?producto=${product.id}`)}
-                  className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2"
+                  onClick={() => router.push(`/salidas?producto=${product.id}&desde=barcode`)}
+                  disabled={product.habilitado === false}
+                  className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ArrowUpCircle size={16} /> Registrar salida
                 </button>
               </div>
+              {product.habilitado === false && (
+                <p className="text-xs text-text-muted mt-3">
+                  Producto deshabilitado: no admite entradas ni salidas. Habilítalo desde Editar producto.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -299,6 +473,14 @@ const BADGES: Record<StockStatus, { label: string; className: string }> = {
   low: { label: 'Stock bajo', className: 'bg-warning-soft text-amber-800' },
   out: { label: 'Agotado', className: 'bg-danger-soft text-red-800' },
 };
+
+function DisabledBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-black text-white">
+      Deshabilitado
+    </span>
+  );
+}
 
 function StatusBadge({ status }: { status: StockStatus }) {
   const { label, className } = BADGES[status];

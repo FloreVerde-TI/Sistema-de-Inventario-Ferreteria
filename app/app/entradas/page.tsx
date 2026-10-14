@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { Product, Movimiento } from '@/types';
-import { Loader2, ArrowDownCircle } from 'lucide-react';
+import { Loader2, ArrowDownCircle, ScanLine } from 'lucide-react';
 
-type ProductOption = Pick<Product, 'id' | 'sku' | 'nombre' | 'stock'>;
+type ProductOption = Pick<Product, 'id' | 'sku' | 'nombre' | 'stock' | 'habilitado'>;
 type EntradaRow = Pick<
   Movimiento,
   'id' | 'producto_id' | 'cantidad' | 'motivo' | 'usuario' | 'proveedor' | 'referencia' | 'created_at'
@@ -49,6 +50,8 @@ function formatDate(iso: string): string {
 }
 
 export default function EntradasPage() {
+  const router = useRouter();
+
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [entradas, setEntradas] = useState<EntradaRow[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -56,6 +59,7 @@ export default function EntradasPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [fromBarcode, setFromBarcode] = useState(false);
 
   const loadData = useCallback(async () => {
     const since = new Date(Date.now() - DAYS_BACK * 24 * 60 * 60 * 1000).toISOString();
@@ -63,8 +67,7 @@ export default function EntradasPage() {
     const [prodRes, entRes] = await Promise.all([
       supabase
         .from('productos')
-        .select('id, sku, nombre, stock')
-        .neq('activo', false)
+        .select('id, sku, nombre, stock, habilitado')
         .order('nombre'),
       supabase
         .from('movimientos')
@@ -91,16 +94,24 @@ export default function EntradasPage() {
     loadData();
   }, [loadData]);
 
-  // Si se llega desde Código de Barras, el producto viene en la dirección (?producto=ID)
+  // Si se llega desde Código de Barras, la dirección trae ?producto=ID&desde=barcode
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get('producto');
-    if (id) setForm((prev) => ({ ...prev, producto_id: id }));
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('producto');
+    setForm(id ? { ...EMPTY_FORM, producto_id: id } : EMPTY_FORM);
+    setFromBarcode(params.get('desde') === 'barcode');
+    setSuccess(null);
+    setError(null);
   }, []);
 
+  // Solo los habilitados se pueden usar; la lista completa sirve para mostrar nombres en el historial
+  const enabledProducts = useMemo(() => products.filter((p) => p.habilitado !== false), [products]);
   const productName = useMemo(() => new Map(products.map((p) => [p.id, p.nombre])), [products]);
 
-  const setField = (key: keyof FormState, value: string) =>
+  const setField = (key: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+    setSuccess(null); // al empezar otro registro, el aviso anterior desaparece
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,8 +119,8 @@ export default function EntradasPage() {
     setSuccess(null);
 
     const cantidad = Number(form.cantidad);
-    if (!form.producto_id) {
-      setError('Selecciona un producto.');
+    if (!enabledProducts.some((p) => p.id === form.producto_id)) {
+      setError('Selecciona un producto habilitado.');
       return;
     }
     if (!Number.isInteger(cantidad) || cantidad <= 0) {
@@ -171,8 +182,18 @@ export default function EntradasPage() {
           </div>
         )}
         {success && (
-          <div className="bg-success-soft text-success border border-success/30 rounded-lg p-4 text-sm">
-            {success}
+          <div className="bg-success-soft text-success border border-success/30 rounded-lg p-4 text-sm flex items-center justify-between gap-4">
+            <span>{success}</span>
+            {/* Solo aparece si se llegó desde Código de Barras */}
+            {fromBarcode && (
+              <button
+                type="button"
+                onClick={() => router.push('/barcode')}
+                className="px-3 py-1.5 text-sm font-medium bg-surface text-text border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2 shrink-0"
+              >
+                <ScanLine size={16} /> Volver a Escanear Producto
+              </button>
+            )}
           </div>
         )}
 
@@ -191,7 +212,7 @@ export default function EntradasPage() {
                 onChange={(e) => setField('producto_id', e.target.value)}
               >
                 <option value="">Seleccionar producto…</option>
-                {products.map((p) => (
+                {enabledProducts.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.sku ? `${p.sku} · ` : ''}
                     {p.nombre} (Stock: {p.stock ?? 0})

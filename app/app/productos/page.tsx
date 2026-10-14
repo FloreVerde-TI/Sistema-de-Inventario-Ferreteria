@@ -1,18 +1,50 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import Link from 'next/link';
+import * as XLSX from 'xlsx';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { Product, Category } from '@/types';
-import { Plus, Search, Eye, Edit, Trash2, Download } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Eye,
+  Edit,
+  Trash2,
+  Download,
+  Globe,
+  Package,
+  X,
+  ChevronDown,
+  FileSpreadsheet,
+  FileText,
+  AlertTriangle,
+  Check,
+} from 'lucide-react';
 
 type ProductRow = Pick<
   Product,
-  'id' | 'sku' | 'codigo_barras' | 'nombre' | 'categoria_id' | 'stock' | 'stock_minimo' | 'ubicacion'
+  | 'id'
+  | 'sku'
+  | 'codigo_barras'
+  | 'nombre'
+  | 'descripcion'
+  | 'precio'
+  | 'imagen_principal'
+  | 'activo'
+  | 'categoria_id'
+  | 'stock'
+  | 'stock_minimo'
+  | 'ubicacion'
+  | 'habilitado'
 >;
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
 type StockStatus = 'normal' | 'low' | 'out';
 type StatusFilter = 'all' | StockStatus;
+type WebFilter = 'all' | 'web' | 'noweb';
 
 // Tarjeta blanca que se mantiene clara en modo oscuro (ver .card-light en globals.css)
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
@@ -20,6 +52,7 @@ const FIELD =
   'px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text outline-none focus:ring-2 focus:ring-primary-light transition-all';
 const TH = 'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-soft';
 const TD = 'px-4 py-3';
+const ICON_BTN = 'p-2 rounded-lg text-text-soft hover:bg-bg hover:text-text transition-colors';
 
 function getStatus(stock?: number | null, min?: number | null): StockStatus {
   const s = stock ?? 0;
@@ -29,14 +62,143 @@ function getStatus(stock?: number | null, min?: number | null): StockStatus {
   return 'normal';
 }
 
+function formatPrice(value?: number | null): string {
+  if (value === null || value === undefined) return '—';
+  return `₡${Number(value).toLocaleString('es-CR', { maximumFractionDigits: 2 })}`;
+}
+
+const STATUS_LABEL: Record<StockStatus, string> = {
+  normal: 'Normal',
+  low: 'Stock bajo',
+  out: 'Agotado',
+};
+
+type MovementRow = {
+  tipo: string;
+  cantidad: number;
+  motivo: string | null;
+  usuario: string | null;
+  origen: string | null;
+  proveedor: string | null;
+  referencia: string | null;
+  created_at: string;
+};
+
+const MOV_PAGE_SIZE = 1000;
+
+// Trae TODOS los movimientos del producto (de 1000 en 1000, por el límite de Supabase)
+async function fetchProductMovements(productId: ProductRow['id']): Promise<MovementRow[]> {
+  const all: MovementRow[] = [];
+  for (let from = 0; ; from += MOV_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('movimientos')
+      .select('tipo, cantidad, motivo, usuario, origen, proveedor, referencia, created_at')
+      .eq('producto_id', productId)
+      .order('created_at', { ascending: true })
+      .range(from, from + MOV_PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const chunk = (data ?? []) as MovementRow[];
+    all.push(...chunk);
+    if (chunk.length < MOV_PAGE_SIZE) break;
+  }
+  return all;
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('es-CR');
+}
+
+function fileSafe(text: string): string {
+  return text.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 40);
+}
+
+function movementFileName(product: ProductRow, ext: 'xlsx' | 'pdf'): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `movimientos_${fileSafe(product.sku || product.nombre)}_${today}.${ext}`;
+}
+
+function exportMovementsExcel(product: ProductRow, rows: MovementRow[]) {
+  const data = rows.map((m) => ({
+    Fecha: formatDateTime(m.created_at),
+    Tipo: m.tipo === 'entrada' ? 'Entrada' : 'Salida',
+    Cantidad: m.cantidad,
+    Motivo: m.motivo ?? '',
+    Proveedor: m.proveedor ?? '',
+    'Documento de referencia': m.referencia ?? '',
+    Usuario: m.usuario ?? '',
+    Origen: m.origen ?? '',
+  }));
+  const sheet = XLSX.utils.json_to_sheet(data);
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, 'Movimientos');
+  XLSX.writeFile(book, movementFileName(product, 'xlsx'));
+}
+
+function exportMovementsPdf(product: ProductRow, rows: MovementRow[]) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const today = new Date().toISOString().slice(0, 10);
+
+  doc.setFontSize(16);
+  doc.text(`Historial de movimientos - ${product.nombre}`, 14, 15);
+  doc.setFontSize(10);
+  doc.text(
+    `Código: ${product.sku ?? '-'}   |   Stock actual: ${product.stock ?? 0}   |   Fecha: ${today}   |   Movimientos: ${rows.length}`,
+    14,
+    21
+  );
+
+  autoTable(doc, {
+    startY: 26,
+    head: [['Fecha', 'Tipo', 'Cantidad', 'Motivo', 'Proveedor', 'Doc. referencia', 'Usuario', 'Origen']],
+    body: rows.map((m) => [
+      formatDateTime(m.created_at),
+      m.tipo === 'entrada' ? 'Entrada' : 'Salida',
+      String(m.cantidad),
+      m.motivo ?? '-',
+      m.proveedor ?? '-',
+      m.referencia ?? '-',
+      m.usuario ?? '-',
+      m.origen ?? '-',
+    ]),
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [37, 99, 235] },
+    columnStyles: { 2: { halign: 'right' } },
+  });
+
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.text(`Página ${i} de ${pages}`, doc.internal.pageSize.getWidth() - 14, doc.internal.pageSize.getHeight() - 8, {
+      align: 'right',
+    });
+  }
+  doc.save(movementFileName(product, 'pdf'));
+}
+
 export default function ProductosPage() {
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
+  const [filterWeb, setFilterWeb] = useState<WebFilter>('all');
+  const [selected, setSelected] = useState<ProductRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ProductRow | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  // Cierra el menú de exportar al hacer clic fuera de él
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false);
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
 
   useEffect(() => {
     async function fetchData() {
@@ -44,7 +206,9 @@ export default function ProductosPage() {
         supabase.from('categorias').select('id, nombre').order('nombre'),
         supabase
           .from('productos')
-          .select('id, sku, codigo_barras, nombre, categoria_id, stock, stock_minimo, ubicacion')
+          .select(
+            'id, sku, codigo_barras, nombre, descripcion, precio, imagen_principal, activo, categoria_id, stock, stock_minimo, ubicacion, habilitado'
+          )
           .order('nombre'),
       ]);
 
@@ -71,9 +235,95 @@ export default function ProductosPage() {
       const matchesCategory = filterCategory === 'all' || p.categoria_id === filterCategory;
       const matchesStatus =
         filterStatus === 'all' || getStatus(p.stock, p.stock_minimo) === filterStatus;
-      return matchesSearch && matchesCategory && matchesStatus;
+      const matchesWeb =
+        filterWeb === 'all' || (filterWeb === 'web' ? p.activo === true : p.activo !== true);
+      return matchesSearch && matchesCategory && matchesStatus && matchesWeb;
     });
-  }, [products, searchTerm, filterCategory, filterStatus]);
+  }, [products, searchTerm, filterCategory, filterStatus, filterWeb]);
+
+  function exportPdf() {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const today = new Date().toISOString().slice(0, 10);
+
+    doc.setFontSize(16);
+    doc.text('Listado de productos - Flore Verde SRL', 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Fecha: ${today}   |   Productos: ${filteredProducts.length}`, 14, 21);
+
+    autoTable(doc, {
+      startY: 26,
+      head: [['Código', 'Cód. barras', 'Nombre', 'Categoría', 'Stock', 'Mín.', 'Ubicación', 'Estado', 'Web']],
+      body: filteredProducts.map((p) => [
+        p.sku ?? '-',
+        p.codigo_barras ?? '-',
+        p.nombre,
+        (p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría',
+        String(p.stock ?? 0),
+        String(p.stock_minimo ?? 0),
+        p.ubicacion ?? '-',
+        STATUS_LABEL[getStatus(p.stock, p.stock_minimo)],
+        p.activo ? 'Sí' : 'No',
+      ]),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [37, 99, 235] },
+      columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } },
+    });
+
+    const pages = doc.getNumberOfPages();
+    for (let i = 1; i <= pages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.text(`Página ${i} de ${pages}`, doc.internal.pageSize.getWidth() - 14, doc.internal.pageSize.getHeight() - 8, {
+        align: 'right',
+      });
+    }
+    doc.save(`productos_${today}.pdf`);
+  }
+
+  function handleExport(format: 'excel' | 'pdf') {
+    setNotice(null);
+    setExportOpen(false);
+    if (filteredProducts.length === 0) {
+      setNotice('No hay productos para exportar con los filtros aplicados.');
+      return;
+    }
+    if (format === 'pdf') {
+      exportPdf();
+      setNotice(`Se exportaron ${filteredProducts.length} productos a PDF.`);
+      return;
+    }
+    const rows = filteredProducts.map((p) => ({
+      Código: p.sku ?? '',
+      'Código de barras': p.codigo_barras ?? '',
+      Nombre: p.nombre,
+      Categoría: (p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría',
+      Precio: p.precio ?? '',
+      Stock: p.stock ?? 0,
+      'Stock mínimo': p.stock_minimo ?? 0,
+      Ubicación: p.ubicacion ?? '',
+      Estado: STATUS_LABEL[getStatus(p.stock, p.stock_minimo)],
+      'En web': p.activo ? 'Sí' : 'No',
+      Descripción: p.descripcion ?? '',
+      'URL de imagen': p.imagen_principal ?? '',
+    }));
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, 'Productos');
+    XLSX.writeFile(book, `productos_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    setNotice(`Se exportaron ${rows.length} productos a Excel.`);
+  }
+
+  function handleDeleted(p: ProductRow) {
+    setProducts((prev) => prev.filter((x) => x.id !== p.id));
+    setDeleteTarget(null);
+    setNotice(`El producto «${p.nombre}» se borró definitivamente.`);
+  }
+
+  function handleDisabled(p: ProductRow) {
+    setProducts((prev) => prev.map((x) => (x.id === p.id ? { ...x, habilitado: false, activo: false } : x)));
+    setDeleteTarget(null);
+    setNotice(`El producto «${p.nombre}» quedó deshabilitado.`);
+  }
 
   return (
     <AdminLayout>
@@ -87,18 +337,52 @@ export default function ProductosPage() {
             </p>
           </div>
           <div className="flex gap-3">
-            <button className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2">
-              <Download size={16} /> Exportar
-            </button>
-            <button className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center gap-2">
+            <div className="relative" ref={exportRef}>
+              <button
+                type="button"
+                onClick={() => setExportOpen((open) => !open)}
+                disabled={loading}
+                className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2 disabled:opacity-60"
+              >
+                <Download size={16} /> Exportar <ChevronDown size={14} />
+              </button>
+              {exportOpen && (
+                <div className="card-light absolute right-0 mt-2 w-48 z-20 bg-surface border border-border rounded-lg shadow-lg overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => handleExport('excel')}
+                    className="w-full px-4 py-2.5 text-sm text-left text-text hover:bg-bg flex items-center gap-2"
+                  >
+                    <FileSpreadsheet size={16} /> Excel (.xlsx)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExport('pdf')}
+                    className="w-full px-4 py-2.5 text-sm text-left text-text hover:bg-bg flex items-center gap-2 border-t border-border"
+                  >
+                    <FileText size={16} /> PDF (.pdf)
+                  </button>
+                </div>
+              )}
+            </div>
+            <Link
+              href="/productos/nuevo"
+              className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center gap-2"
+            >
               <Plus size={16} /> Nuevo producto
-            </button>
+            </Link>
           </div>
         </div>
 
         {error && (
           <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-4 text-sm">
             No se pudieron cargar los productos: {error}
+          </div>
+        )}
+
+        {notice && (
+          <div className="bg-primary-soft text-primary-ink border border-primary/20 rounded-lg p-4 text-sm">
+            {notice}
           </div>
         )}
 
@@ -134,6 +418,12 @@ export default function ProductosPage() {
             <option value="low">Stock bajo</option>
             <option value="out">Agotado</option>
           </select>
+
+          <select className={FIELD} value={filterWeb} onChange={(e) => setFilterWeb(e.target.value as WebFilter)}>
+            <option value="all">Todos</option>
+            <option value="web">En Web</option>
+            <option value="noweb">No en Web</option>
+          </select>
         </div>
 
         {/* Tabla */}
@@ -159,10 +449,21 @@ export default function ProductosPage() {
                 <tbody className="divide-y divide-border">
                   {filteredProducts.length > 0 ? (
                     filteredProducts.map((p) => (
-                      <tr key={p.id} className="hover:bg-surface-alt transition-colors">
+                      <tr
+                        key={p.id}
+                        className={`hover:bg-surface-alt transition-colors ${p.habilitado === false ? 'bg-surface-alt' : ''}`}
+                      >
                         <td className={`${TD} font-bold text-text`}>{p.sku || '—'}</td>
                         <td className={`${TD} text-text-muted`}>{p.codigo_barras || '—'}</td>
-                        <td className={`${TD} font-medium text-text`}>{p.nombre}</td>
+                        <td
+                          className={`${TD} font-medium ${
+                            p.habilitado === false
+                              ? 'text-text-muted line-through decoration-red-400 decoration-2'
+                              : 'text-text'
+                          }`}
+                        >
+                          {p.nombre}
+                        </td>
                         <td className={`${TD} text-text-soft`}>
                           {(p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría'}
                         </td>
@@ -170,17 +471,39 @@ export default function ProductosPage() {
                         <td className={`${TD} text-right text-text-muted`}>{p.stock_minimo ?? 0}</td>
                         <td className={`${TD} text-text-soft`}>{p.ubicacion || '—'}</td>
                         <td className={TD}>
-                          <StatusBadge status={getStatus(p.stock, p.stock_minimo)} />
+                          <div className="flex flex-col items-start gap-1">
+                            {p.habilitado === false ? (
+                              <DisabledBadge />
+                            ) : (
+                              <>
+                                <StatusBadge status={getStatus(p.stock, p.stock_minimo)} />
+                                {p.activo && <WebBadge />}
+                              </>
+                            )}
+                          </div>
                         </td>
                         <td className={TD}>
                           <div className="flex justify-end gap-1">
-                            <button title="Ver" className="p-2 rounded-lg text-text-soft hover:bg-bg hover:text-text transition-colors">
+                            <button
+                              type="button"
+                              title="Ver"
+                              onClick={() => setSelected(p)}
+                              className={ICON_BTN}
+                            >
                               <Eye size={16} />
                             </button>
-                            <button title="Editar" className="p-2 rounded-lg text-text-soft hover:bg-bg hover:text-text transition-colors">
+                            <Link href={`/productos/${p.id}/editar`} title="Editar" className={ICON_BTN}>
                               <Edit size={16} />
-                            </button>
-                            <button title="Eliminar" className="p-2 rounded-lg text-danger hover:bg-danger-soft transition-colors">
+                            </Link>
+                            <button
+                              type="button"
+                              title="Eliminar"
+                              onClick={() => {
+                                setNotice(null);
+                                setDeleteTarget(p);
+                              }}
+                              className="p-2 rounded-lg text-danger hover:bg-danger-soft transition-colors"
+                            >
                               <Trash2 size={16} />
                             </button>
                           </div>
@@ -202,6 +525,23 @@ export default function ProductosPage() {
           )}
         </div>
       </div>
+
+      {selected && (
+        <ProductDetailModal
+          product={selected}
+          categoria={(selected.categoria_id && categoryName.get(selected.categoria_id)) || 'Sin categoría'}
+          onClose={() => setSelected(null)}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteProductModal
+          product={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={handleDeleted}
+          onDisabled={handleDisabled}
+        />
+      )}
     </AdminLayout>
   );
 }
@@ -223,5 +563,322 @@ function StatusBadge({ status }: { status: StockStatus }) {
       <span className="w-1.5 h-1.5 rounded-full bg-current" />
       {label}
     </span>
+  );
+}
+
+function DisabledBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-black text-white">
+      Deshabilitado
+    </span>
+  );
+}
+
+function WebBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-primary-soft text-primary-ink">
+      <Globe size={10} />
+      En web
+    </span>
+  );
+}
+
+function DetailItem({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-soft">{label}</p>
+      <p className="text-sm text-text mt-0.5 break-words">{value}</p>
+    </div>
+  );
+}
+
+function ProductDetailModal({
+  product,
+  categoria,
+  onClose,
+}: {
+  product: ProductRow;
+  categoria: string;
+  onClose: () => void;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const imageUrl = product.imagen_principal?.trim() ?? '';
+  const showImage = imageUrl !== '' && !imgFailed;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className={`${CARD} w-full max-w-2xl max-h-[90vh] overflow-y-auto`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 p-6 border-b border-border">
+          <div>
+            <h3 className="text-lg font-bold text-text">{product.nombre}</h3>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {product.habilitado === false ? (
+                <DisabledBadge />
+              ) : (
+                <>
+                  <StatusBadge status={getStatus(product.stock, product.stock_minimo)} />
+                  {product.activo && <WebBadge />}
+                </>
+              )}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} title="Cerrar" className={ICON_BTN}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-6 grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <div className="aspect-square rounded-lg bg-bg border border-border flex items-center justify-center overflow-hidden">
+            {showImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={imageUrl}
+                alt={product.nombre}
+                className="w-full h-full object-contain"
+                onError={() => setImgFailed(true)}
+              />
+            ) : (
+              <div className="text-center text-text-muted">
+                <Package size={40} className="mx-auto mb-1" />
+                <p className="text-xs">Sin imagen</p>
+              </div>
+            )}
+          </div>
+
+          <div className="sm:col-span-2 grid grid-cols-2 gap-4">
+            <DetailItem label="Categoría" value={categoria} />
+            <DetailItem label="Precio" value={formatPrice(product.precio)} />
+            <DetailItem label="Código (SKU)" value={product.sku || '—'} />
+            <DetailItem label="Código de barras" value={product.codigo_barras || '—'} />
+            <DetailItem label="Stock actual" value={product.stock ?? 0} />
+            <DetailItem label="Stock mínimo" value={product.stock_minimo ?? 0} />
+            <div className="col-span-2">
+              <DetailItem label="Ubicación" value={product.ubicacion || '—'} />
+            </div>
+          </div>
+
+          <div className="sm:col-span-3">
+            <DetailItem label="Descripción" value={product.descripcion || 'Sin descripción'} />
+          </div>
+          <div className="sm:col-span-3">
+            <DetailItem label="URL de la imagen" value={imageUrl || '—'} />
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-border flex justify-end gap-3">
+          <Link
+            href={`/productos/${product.id}/editar`}
+            className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors flex items-center gap-2"
+          >
+            <Edit size={16} /> Editar
+          </Link>
+          <button
+            type="button"
+            onClick={onClose}
+            className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteProductModal({
+  product,
+  onClose,
+  onDeleted,
+  onDisabled,
+}: {
+  product: ProductRow;
+  onClose: () => void;
+  onDeleted: (p: ProductRow) => void;
+  onDisabled: (p: ProductRow) => void;
+}) {
+  const [busy, setBusy] = useState<'export' | 'delete' | 'disable' | null>(null);
+  const [exportedMsg, setExportedMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState(false);
+  const alreadyDisabled = product.habilitado === false;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !busy) onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, busy]);
+
+  async function handleExport(format: 'excel' | 'pdf') {
+    setError(null);
+    setBusy('export');
+    try {
+      const rows = await fetchProductMovements(product.id);
+      if (rows.length === 0) {
+        setExportedMsg('Este producto no tiene movimientos, no hay nada que exportar.');
+      } else {
+        if (format === 'excel') exportMovementsExcel(product, rows);
+        else exportMovementsPdf(product, rows);
+        setExportedMsg(`Se exportaron ${rows.length} movimientos a ${format === 'excel' ? 'Excel' : 'PDF'}.`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo exportar el historial.');
+    }
+    setBusy(null);
+  }
+
+  async function handleDelete() {
+    if (!exportedMsg) return;
+    setError(null);
+    setBlocked(false);
+    setBusy('delete');
+    const { data, error: delError } = await supabase
+      .from('productos')
+      .delete()
+      .eq('id', product.id)
+      .select('id');
+    setBusy(null);
+
+    if (delError) {
+      // 23503 = la base no deja borrar porque hay pedidos web (detalle_pedido)
+      if (delError.code === '23503') setBlocked(true);
+      else setError(delError.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setError('La base no borró el producto. Revisa los permisos (RLS).');
+      return;
+    }
+    onDeleted(product);
+  }
+
+  async function handleDisable() {
+    setError(null);
+    setBusy('disable');
+    const { data, error: updError } = await supabase
+      .from('productos')
+      .update({ habilitado: false, activo: false })
+      .eq('id', product.id)
+      .select('id');
+    setBusy(null);
+
+    if (updError) {
+      setError(updError.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setError('La base no deshabilitó el producto. Revisa los permisos (RLS).');
+      return;
+    }
+    onDisabled(product);
+  }
+
+  const STEP = 'border border-border rounded-lg p-4';
+  const BTN =
+    'card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      onClick={() => !busy && onClose()}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className={`${CARD} w-full max-w-lg max-h-[90vh] overflow-y-auto`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start gap-3 p-6 border-b border-border">
+          <AlertTriangle className="text-danger shrink-0 mt-0.5" size={22} />
+          <div>
+            <h3 className="text-lg font-bold text-text">Eliminar producto</h3>
+            <p className="text-sm text-text-soft mt-0.5">{product.nombre}</p>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <p className="text-sm text-text-soft">
+            Borrar elimina el producto y todo su historial de movimientos. No se puede deshacer.
+          </p>
+
+          {error && (
+            <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-3 text-sm">{error}</div>
+          )}
+
+          {blocked && (
+            <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-3 text-sm">
+              No se puede borrar: este producto tiene pedidos web asociados. Puedes deshabilitarlo para que no se use
+              más.
+            </div>
+          )}
+
+          <div className={STEP}>
+            <p className="text-sm font-semibold text-text mb-3">1. Exporta el historial de movimientos</p>
+            <div className="flex gap-3">
+              <button type="button" disabled={busy !== null} onClick={() => handleExport('excel')} className={BTN}>
+                <FileSpreadsheet size={16} /> Excel
+              </button>
+              <button type="button" disabled={busy !== null} onClick={() => handleExport('pdf')} className={BTN}>
+                <FileText size={16} /> PDF
+              </button>
+            </div>
+            {busy === 'export' && <p className="text-xs text-text-muted mt-2">Exportando...</p>}
+            {exportedMsg && (
+              <p className="text-xs text-success mt-2 flex items-center gap-1">
+                <Check size={14} /> {exportedMsg}
+              </p>
+            )}
+          </div>
+
+          <div className={STEP}>
+            <p className="text-sm font-semibold text-text mb-3">2. Borra definitivamente</p>
+            <button
+              type="button"
+              disabled={!exportedMsg || busy !== null}
+              onClick={handleDelete}
+              className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Trash2 size={16} /> {busy === 'delete' ? 'Borrando...' : 'Borrar definitivamente'}
+            </button>
+            {!exportedMsg && <p className="text-xs text-text-muted mt-2">Primero debes exportar el historial.</p>}
+          </div>
+
+          <div className={STEP}>
+            <p className="text-sm font-semibold text-text mb-1">¿Prefieres conservarlo?</p>
+            <p className="text-xs text-text-muted mb-3">
+              Deshabilitar lo oculta de la web y de Entradas y Salidas, pero guarda todo su historial.
+            </p>
+            <button
+              type="button"
+              disabled={alreadyDisabled || busy !== null}
+              onClick={handleDisable}
+              className={BTN}
+            >
+              {alreadyDisabled ? 'Ya está deshabilitado' : busy === 'disable' ? 'Deshabilitando...' : 'Solo deshabilitar'}
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-border flex justify-end">
+          <button type="button" disabled={busy !== null} onClick={onClose} className={BTN}>
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

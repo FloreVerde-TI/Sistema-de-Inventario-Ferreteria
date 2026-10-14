@@ -1,0 +1,494 @@
+"use client";
+
+import React, { Suspense, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import AdminLayout from '@/components/AdminLayout';
+import { supabase } from '@/lib/supabase';
+import { Product, Category } from '@/types';
+import { Save, X, Loader2, Package, Globe, CheckCircle2, Power } from 'lucide-react';
+
+type CategoryRow = Pick<Category, 'id' | 'nombre'>;
+type ProductRow = Pick<
+  Product,
+  | 'id'
+  | 'nombre'
+  | 'descripcion'
+  | 'categoria_id'
+  | 'precio'
+  | 'sku'
+  | 'codigo_barras'
+  | 'stock'
+  | 'stock_minimo'
+  | 'ubicacion'
+  | 'imagen_principal'
+  | 'activo'
+  | 'habilitado'
+>;
+
+interface FormState {
+  nombre: string;
+  descripcion: string;
+  categoria: string; // id de categoría o NEW_CATEGORY
+  nuevaCategoria: string;
+  precio: string;
+  sku: string;
+  codigo_barras: string;
+  stock_minimo: string;
+  ubicacion: string;
+  imagen: string;
+  enWeb: boolean;
+  habilitado: boolean;
+}
+
+const NEW_CATEGORY = '__nueva__';
+
+const PRODUCT_FIELDS =
+  'id, nombre, descripcion, categoria_id, precio, sku, codigo_barras, stock, stock_minimo, ubicacion, imagen_principal, activo, habilitado';
+
+const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
+const FIELD =
+  'w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text outline-none focus:ring-2 focus:ring-primary-light transition-all disabled:opacity-50 disabled:cursor-not-allowed';
+const LABEL = 'block text-xs font-semibold uppercase tracking-wide text-text-soft mb-1';
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    return String((err as { message: unknown }).message);
+  }
+  return 'Error desconocido';
+}
+
+function isNonNegativeInt(n: number): boolean {
+  return Number.isInteger(n) && n >= 0;
+}
+
+function toForm(p: ProductRow): FormState {
+  return {
+    nombre: p.nombre ?? '',
+    descripcion: p.descripcion ?? '',
+    categoria: p.categoria_id ?? '',
+    nuevaCategoria: '',
+    precio: p.precio === null || p.precio === undefined ? '' : String(p.precio),
+    sku: p.sku ?? '',
+    codigo_barras: p.codigo_barras ?? '',
+    stock_minimo: String(p.stock_minimo ?? 0),
+    ubicacion: p.ubicacion ?? '',
+    imagen: p.imagen_principal ?? '',
+    enWeb: p.activo === true,
+    habilitado: p.habilitado !== false,
+  };
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-sm font-bold text-text mb-4 pb-2 border-b border-border">{children}</h3>;
+}
+
+function EditarProductoForm() {
+  const { id } = useParams<{ id: string }>();
+
+  const [form, setForm] = useState<FormState | null>(null);
+  const [stock, setStock] = useState(0);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    async function fetchData() {
+      const [catRes, prodRes] = await Promise.all([
+        supabase.from('categorias').select('id, nombre').order('nombre'),
+        supabase.from('productos').select(PRODUCT_FIELDS).eq('id', id).maybeSingle(),
+      ]);
+
+      const failed = catRes.error ?? prodRes.error;
+      if (failed) {
+        setError(`No se pudo cargar el producto: ${failed.message}`);
+      } else if (!prodRes.data) {
+        setNotFound(true);
+      } else {
+        const p = prodRes.data as ProductRow;
+        setCategories((catRes.data ?? []) as CategoryRow[]);
+        setForm(toForm(p));
+        setStock(p.stock ?? 0);
+      }
+      setLoading(false);
+    }
+    fetchData();
+  }, [id]);
+
+  function set<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form) return;
+    setError(null);
+    setSuccess(null);
+
+    const nombre = form.nombre.trim();
+    const precio = Number(form.precio);
+    const minimo = Number(form.stock_minimo);
+    const nuevaCat = form.nuevaCategoria.trim();
+    const barras = form.codigo_barras.trim();
+    const creatingCategory = form.categoria === NEW_CATEGORY;
+
+    if (!nombre) return setError('Escribe el nombre del producto.');
+    if (!form.categoria) return setError('Elige una categoría.');
+    if (creatingCategory && !nuevaCat) return setError('Escribe el nombre de la nueva categoría.');
+    if (form.precio.trim() === '' || !Number.isFinite(precio) || precio < 0) {
+      return setError('El precio debe ser un número igual o mayor a 0.');
+    }
+    if (!isNonNegativeInt(minimo)) return setError('El stock mínimo debe ser un entero igual o mayor a 0.');
+
+    setSaving(true);
+    try {
+      // 1. Código de barras repetido en OTRO producto
+      if (barras) {
+        const { data: dup, error: dupErr } = await supabase
+          .from('productos')
+          .select('id, nombre')
+          .eq('codigo_barras', barras)
+          .neq('id', id)
+          .limit(1);
+        if (dupErr) throw dupErr;
+        if (dup && dup.length > 0) {
+          setError(`Ese código de barras ya pertenece a "${dup[0].nombre}".`);
+          return;
+        }
+      }
+
+      // 2. Categoría (existente o nueva)
+      let categoriaId = form.categoria;
+      if (creatingCategory) {
+        const existing = categories.find((c) => c.nombre.trim().toLowerCase() === nuevaCat.toLowerCase());
+        if (existing) {
+          categoriaId = existing.id;
+        } else {
+          const { data: cat, error: catErr } = await supabase
+            .from('categorias')
+            .insert({ nombre: nuevaCat })
+            .select('id, nombre')
+            .single();
+          if (catErr) throw catErr;
+          const created = cat as CategoryRow;
+          categoriaId = created.id;
+          setCategories((prev) => [...prev, created].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+        }
+      }
+
+      // 3. Actualizar (el stock NO se toca: cambia solo con Entradas/Salidas)
+      const visibleEnWeb = form.habilitado && form.enWeb;
+      const { error: updErr } = await supabase
+        .from('productos')
+        .update({
+          nombre,
+          descripcion: form.descripcion.trim(),
+          categoria_id: categoriaId,
+          precio,
+          sku: form.sku.trim() || null,
+          codigo_barras: barras || null,
+          stock_minimo: minimo,
+          ubicacion: form.ubicacion.trim() || null,
+          imagen_principal: form.imagen.trim() || null,
+          activo: visibleEnWeb,
+          habilitado: form.habilitado,
+        })
+        .eq('id', id);
+      if (updErr) throw updErr;
+
+      setForm((prev) =>
+        prev ? { ...prev, categoria: categoriaId, nuevaCategoria: '', enWeb: visibleEnWeb } : prev
+      );
+      setSuccess(`Producto "${nombre}" actualizado correctamente.`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const header = (
+    <div className="flex items-end justify-between">
+      <div>
+        <h2 className="text-2xl font-bold text-text tracking-tight">Editar producto</h2>
+        <p className="text-text-muted text-sm">Modifica los datos del artículo</p>
+      </div>
+      <Link
+        href="/productos"
+        className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2"
+      >
+        <X size={16} /> Volver
+      </Link>
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <AdminLayout>
+        <div className="space-y-6">
+          {header}
+          <div className={`${CARD} p-20 text-center text-text-muted italic`}>Cargando producto...</div>
+        </div>
+      </AdminLayout>
+    );
+  }
+
+  if (notFound || !form) {
+    return (
+      <AdminLayout>
+        <div className="space-y-6">
+          {header}
+          <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-4 text-sm">
+            {error ?? 'No se encontró el producto.'}
+          </div>
+        </div>
+      </AdminLayout>
+    );
+  }
+
+  const creatingCategory = form.categoria === NEW_CATEGORY;
+  const imageUrl = form.imagen.trim();
+  const showImage = imageUrl !== '' && !imgFailed;
+
+  return (
+    <AdminLayout>
+      <div className="space-y-6">
+        {header}
+
+        {error && (
+          <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-4 text-sm">{error}</div>
+        )}
+
+        {success && (
+          <div className="bg-success-soft text-green-800 border border-green-800/20 rounded-lg p-4 text-sm flex items-center justify-between gap-4">
+            <span className="flex items-center gap-2">
+              <CheckCircle2 size={18} /> {success}
+            </span>
+            <Link href="/productos" className="font-semibold underline">
+              Ir a productos
+            </Link>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          {/* Columna izquierda */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className={`${CARD} p-6`}>
+              <SectionTitle>Información general</SectionTitle>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className={LABEL}>Nombre del producto *</label>
+                  <input className={FIELD} value={form.nombre} onChange={(e) => set('nombre', e.target.value)} />
+                </div>
+
+                <div>
+                  <label className={LABEL}>Categoría *</label>
+                  <select
+                    className={FIELD}
+                    value={form.categoria}
+                    onChange={(e) => {
+                      set('categoria', e.target.value);
+                      if (e.target.value !== NEW_CATEGORY) set('nuevaCategoria', '');
+                    }}
+                  >
+                    <option value="">Seleccionar...</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre}
+                      </option>
+                    ))}
+                    <option value={NEW_CATEGORY}>+ Crear nueva categoría</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={LABEL}>Nueva categoría</label>
+                  <input
+                    className={FIELD}
+                    value={form.nuevaCategoria}
+                    onChange={(e) => set('nuevaCategoria', e.target.value)}
+                    disabled={!creatingCategory}
+                    placeholder={creatingCategory ? 'Nombre de la categoría' : 'Elige "Crear nueva categoría"'}
+                  />
+                </div>
+
+                <div>
+                  <label className={LABEL}>Código (SKU)</label>
+                  <input
+                    className={FIELD}
+                    value={form.sku}
+                    onChange={(e) => set('sku', e.target.value)}
+                    placeholder="Opcional"
+                  />
+                </div>
+
+                <div>
+                  <label className={LABEL}>Código de barras</label>
+                  <input
+                    className={FIELD}
+                    value={form.codigo_barras}
+                    onChange={(e) => set('codigo_barras', e.target.value)}
+                    placeholder="Opcional"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className={LABEL}>Descripción</label>
+                  <textarea
+                    className={`${FIELD} h-24 resize-none`}
+                    value={form.descripcion}
+                    onChange={(e) => set('descripcion', e.target.value)}
+                    placeholder="Detalles del producto (se muestra también en la web)"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className={`${CARD} p-6`}>
+              <SectionTitle>Precio e inventario</SectionTitle>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={LABEL}>Precio de venta (₡) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className={FIELD}
+                    value={form.precio}
+                    onChange={(e) => set('precio', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className={LABEL}>Ubicación (pasillo / estante)</label>
+                  <input
+                    className={FIELD}
+                    value={form.ubicacion}
+                    onChange={(e) => set('ubicacion', e.target.value)}
+                    placeholder="Ej: Pasillo A, Estante 3"
+                  />
+                </div>
+                <div>
+                  <label className={LABEL}>Stock actual (solo lectura)</label>
+                  <input className={FIELD} value={stock} disabled readOnly />
+                </div>
+                <div>
+                  <label className={LABEL}>Stock mínimo (alerta) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className={FIELD}
+                    value={form.stock_minimo}
+                    onChange={(e) => set('stock_minimo', e.target.value)}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-text-muted mt-3">
+                El stock se modifica desde Entradas y Salidas para mantener el historial de Movimientos.
+              </p>
+            </div>
+          </div>
+
+          {/* Columna derecha */}
+          <div className="space-y-6">
+            <div className={`${CARD} p-6`}>
+              <SectionTitle>Imagen</SectionTitle>
+              <div className="aspect-square w-full rounded-lg bg-bg border border-border flex items-center justify-center overflow-hidden mb-4">
+                {showImage ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imageUrl}
+                    alt="Vista previa"
+                    className="w-full h-full object-contain"
+                    onError={() => setImgFailed(true)}
+                  />
+                ) : (
+                  <div className="text-center text-text-muted">
+                    <Package size={48} className="mx-auto mb-2" />
+                    <p className="text-xs">
+                      {imgFailed ? 'No se pudo cargar la imagen' : 'Sin imagen (se usará la predeterminada)'}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <label className={LABEL}>URL de la imagen</label>
+              <input
+                className={FIELD}
+                value={form.imagen}
+                onChange={(e) => {
+                  set('imagen', e.target.value);
+                  setImgFailed(false);
+                }}
+                placeholder="https://..."
+              />
+            </div>
+
+            <div className={`${CARD} p-6 space-y-5`}>
+              <SectionTitle>Estado y publicación</SectionTitle>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-primary"
+                  checked={form.habilitado}
+                  onChange={(e) => {
+                    set('habilitado', e.target.checked);
+                    if (!e.target.checked) set('enWeb', false);
+                  }}
+                />
+                <span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-text">
+                    <Power size={16} /> Producto habilitado
+                  </span>
+                  <span className="block text-xs text-text-muted mt-0.5">
+                    Si lo deshabilitas, no se podrá usar en Entradas, Salidas ni en la web.
+                  </span>
+                </span>
+              </label>
+
+              <label className={`flex items-start gap-3 ${form.habilitado ? 'cursor-pointer' : 'opacity-50'}`}>
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-primary"
+                  checked={form.enWeb}
+                  disabled={!form.habilitado}
+                  onChange={(e) => set('enWeb', e.target.checked)}
+                />
+                <span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-text">
+                    <Globe size={16} /> Disponible en la web
+                  </span>
+                  <span className="block text-xs text-text-muted mt-0.5">
+                    Si está activo, el producto aparece en la página promocional.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+              {saving ? 'Guardando...' : 'Guardar cambios'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </AdminLayout>
+  );
+}
+
+export default function EditarProductoPage() {
+  return (
+    <Suspense fallback={null}>
+      <EditarProductoForm />
+    </Suspense>
+  );
+}

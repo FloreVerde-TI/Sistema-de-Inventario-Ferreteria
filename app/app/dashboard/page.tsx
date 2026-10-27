@@ -55,7 +55,8 @@ const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
   { key: 'custom', label: 'Personalizado…' },
 ];
 
-const CATEGORY_COLORS = ['#1e40af', '#3b82f6', '#0ea5e9', '#06b6d4', '#10b981', '#f59e0b'];
+// Paleta basada en el logo (verdes) con contrastes para distinguir categorías
+const CATEGORY_COLORS = ['#1f7a3a', '#5bbd6a', '#0f766e', '#84cc16', '#14b8a6', '#f59e0b'];
 const PAGE = 1000; // Supabase devuelve máx. 1000 filas por consulta
 
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
@@ -474,7 +475,7 @@ function DashboardContent() {
                     <YAxis allowDecimals={false} tick={{ fill: '#475569', fontSize: 12 }} tickLine={false} axisLine={false} />
                     <Tooltip cursor={{ fill: '#f8fafc' }} />
                     <Legend verticalAlign="top" align="right" height={36} />
-                    <Bar dataKey="Entrada" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Entrada" fill="#2a8a45" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="Salida" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>

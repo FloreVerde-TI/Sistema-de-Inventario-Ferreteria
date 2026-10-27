@@ -3,26 +3,30 @@
 /* El modo oscuro se activa cuando <html> tiene la clase "dark" */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ===== Colores modo claro (los del index.html) =====
+/* ===== Colores modo claro (identidad Flore Verde) =====
    .card-light vuelve a aplicar estos colores dentro de una tarjeta, para que siga
    blanca (con texto oscuro) aunque la página esté en modo oscuro. */
 :root,
 .card-light {
-  --primary: #1e40af;
-  --primary-dark: #1e3a8a;
-  --primary-light: #3b82f6;
-  --primary-soft: #dbeafe;
-  --primary-ink: #1e40af; /* texto sobre fondos primary-soft */
+  --primary: #1f7a3a;
+  --primary-dark: #17602d;
+  --primary-light: #4caf50;
+  --primary-soft: #e3f3e6;
+  --primary-ink: #17602d; /* texto sobre fondos primary-soft */
 
-  --bg: #f1f5f9;
+  --bg: #f2f7f3;
   --surface: #ffffff;
-  --surface-alt: #f8fafc;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
+  --surface-alt: #f6faf7;
+  --border: #e1ebe4;
+  --border-strong: #c7d8cc;
 
-  --text: #0f172a;
-  --text-soft: #475569;
-  --text-muted: #94a3b8;
+  --text: #102018;
+  --text-soft: #4a5f52;
+  --text-muted: #8fa396;
+
+  /* Degradados suaves (fondo general y menú lateral) */
+  --bg-gradient: linear-gradient(160deg, #f8fbf9 0%, #f1f7f3 55%, #e8f2eb 100%);
+  --sidebar-gradient: linear-gradient(180deg, #ffffff 0%, #f4f9f5 100%);
 
   --success: #16a34a;
   --success-soft: #dcfce7;
@@ -38,21 +42,25 @@
 
 /* ===== Colores modo oscuro ===== */
 .dark {
-  --primary: #2563eb;
-  --primary-dark: #1d4ed8;
-  --primary-light: #60a5fa;
-  --primary-soft: #172554;
-  --primary-ink: #93c5fd;
+  --primary: #2a8a45;
+  --primary-dark: #22733a;
+  --primary-light: #5bbd6a;
+  --primary-soft: #12301d;
+  --primary-ink: #93d9a3;
 
-  --bg: #0b1120;
-  --surface: #111b2e;
-  --surface-alt: #16213a;
-  --border: #1e293b;
-  --border-strong: #334155;
+  --bg: #08130d;
+  --surface: #0d1c14;
+  --surface-alt: #11251a;
+  --border: #1a3324;
+  --border-strong: #27472f;
 
-  --text: #e2e8f0;
-  --text-soft: #94a3b8;
-  --text-muted: #64748b;
+  --text: #e3ece6;
+  --text-soft: #9db3a4;
+  --text-muted: #6a8573;
+
+  /* Verde carbón con un toque de bosque abajo: suave para muchas horas de uso */
+  --bg-gradient: linear-gradient(160deg, #060f0a 0%, #09170f 50%, #0d2115 100%);
+  --sidebar-gradient: linear-gradient(180deg, #0c1b12 0%, #0a170f 60%, #0d2316 100%);
 
   --success: #22c55e;
   --success-soft: #052e1a;
@@ -110,6 +118,8 @@
 
   body {
     background-color: var(--bg);
+    background-image: var(--bg-gradient);
+    background-attachment: fixed;
     color: var(--text);
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
@@ -119,5 +129,9 @@
 @layer components {
   .card-light {
     color: var(--text);
+  }
+
+  .app-sidebar {
+    background-image: var(--sidebar-gradient);
   }
 }

@@ -1,161 +1,766 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
-import { Product } from '@/types';
-import { FileSpreadsheet, FileText, Printer, Download, Loader2 } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { Product, Category, Movimiento } from '@/types';
+import { exportReport, formatMoney, type Column, type ExportSpec, type Format } from '@/lib/exportar';
+import {
+  FileSpreadsheet, FileText, Package, AlertTriangle, Ban, ArrowLeftRight, ShoppingCart,
+  SlidersHorizontal, X, Loader2,
+} from 'lucide-react';
+
+/* ---------- Tipos ---------- */
+type ProductRow = Pick<
+  Product,
+  | 'id' | 'sku' | 'codigo_barras' | 'nombre' | 'descripcion' | 'precio' | 'categoria_id'
+  | 'stock' | 'stock_minimo' | 'ubicacion' | 'activo' | 'habilitado'
+>;
+type CategoryRow = Pick<Category, 'id' | 'nombre'>;
+type ProductName = Pick<Product, 'id' | 'nombre'>;
+type MovRow = Pick<
+  Movimiento,
+  'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'origen' | 'proveedor' | 'referencia' | 'created_at'
+>;
+type PedidoRow = {
+  fecha: string | null;
+  nombre_cliente: string | null;
+  telefono: string | null;
+  metodo_pago: string | null;
+  total: number | null;
+  estado: string | null;
+  revisado_nombre: string | null;
+  revisado_en: string | null;
+  motivo_rechazo: string | null;
+  reabierto_nombre: string | null;
+  reabierto_en: string | null;
+};
+
+type ProductItem = ProductRow & { categoria: string };
+type MovItem = MovRow & { producto: string };
+
+type Source = 'productos' | 'movimientos' | 'pedidos';
+
+type ProdFilter = { categoria: string; deshabilitados: boolean };
+type MovFilter = { desde: string; hasta: string; tipo: 'all' | 'entrada' | 'salida'; producto: string };
+type EstadoFilter = 'all' | 'Pendiente' | 'Aprobado' | 'Rechazado';
+type PagoFilter = 'all' | 'sinpe' | 'transferencia' | 'whatsapp';
+type PedFilter = { desde: string; hasta: string; estado: EstadoFilter; pago: PagoFilter };
+
+const EMPTY_PROD: ProdFilter = { categoria: 'all', deshabilitados: false };
+const EMPTY_MOV: MovFilter = { desde: '', hasta: '', tipo: 'all', producto: 'all' };
+const EMPTY_PED: PedFilter = { desde: '', hasta: '', estado: 'all', pago: 'all' };
+
+const PRODUCT_FIELDS =
+  'id, sku, codigo_barras, nombre, descripcion, precio, categoria_id, stock, stock_minimo, ubicacion, activo, habilitado';
+const MOV_FIELDS = 'producto_id, tipo, cantidad, motivo, usuario, origen, proveedor, referencia, created_at';
+const PED_FIELDS =
+  'fecha, nombre_cliente, telefono, metodo_pago, total, estado, revisado_nombre, revisado_en, motivo_rechazo, reabierto_nombre, reabierto_en';
+const PAGE = 1000; // límite de filas por consulta en Supabase
+
+const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
+const FIELD =
+  'w-full px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text outline-none focus:ring-2 focus:ring-primary-light transition-all';
+const LABEL = 'block text-[11px] font-semibold uppercase tracking-wide text-text-soft mb-1';
+
+const PAGO_LABEL: Record<string, string> = { sinpe: 'SINPE', transferencia: 'Transferencia', whatsapp: 'WhatsApp' };
+const SOURCE_LABEL: Record<Source, string> = { productos: 'Productos', movimientos: 'Movimientos', pedidos: 'Pedidos web' };
+
+/* ---------- Funciones auxiliares ---------- */
+
+function errorMessage(e: unknown): string {
+  if (typeof e === 'object' && e !== null && 'message' in e) return String((e as { message: unknown }).message);
+  return 'Error desconocido';
+}
+
+function formatDateTime(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleString('es-CR') : '';
+}
+
+function stockStatus(p: ProductRow): 'Normal' | 'Stock bajo' | 'Agotado' {
+  const s = p.stock ?? 0;
+  if (s <= 0) return 'Agotado';
+  if (s <= (p.stock_minimo ?? 0)) return 'Stock bajo';
+  return 'Normal';
+}
+
+function normEstado(estado: string | null): 'Pendiente' | 'Aprobado' | 'Rechazado' {
+  const e = (estado ?? '').trim().toLowerCase();
+  if (e === 'aprobado') return 'Aprobado';
+  if (e === 'rechazado') return 'Rechazado';
+  return 'Pendiente';
+}
+
+function pick<T>(cols: Column<T>[], keys: string[]): Column<T>[] {
+  return keys.map((k) => cols.find((c) => c.key === k)).filter((c): c is Column<T> => !!c);
+}
+
+function rangeText(desde: string, hasta: string): string {
+  if (!desde && !hasta) return 'Todo el historial';
+  const f = (s: string) => s.split('-').reverse().join('/');
+  return `${desde ? f(desde) : 'inicio'} a ${hasta ? f(hasta) : 'hoy'}`;
+}
+
+function checkRange(desde: string, hasta: string) {
+  if (desde && hasta && desde > hasta) throw new Error('La fecha inicial no puede ser mayor que la final.');
+}
+
+const dayStart = (d: string) => new Date(`${d}T00:00:00`).toISOString();
+const dayEnd = (d: string) => new Date(`${d}T23:59:59.999`).toISOString();
+
+async function fetchAll<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as T[];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return all;
+}
+
+/* ---------- Columnas disponibles (se reutilizan en todos los reportes) ---------- */
+
+const PRODUCT_COLUMNS: Column<ProductItem>[] = [
+  { key: 'sku', label: 'Código', get: (p) => p.sku ?? '' },
+  { key: 'barras', label: 'Cód. barras', get: (p) => p.codigo_barras ?? '' },
+  { key: 'nombre', label: 'Nombre', get: (p) => p.nombre },
+  { key: 'categoria', label: 'Categoría', get: (p) => p.categoria },
+  { key: 'precio', label: 'Precio', get: (p) => p.precio ?? 0, right: true, money: true },
+  { key: 'stock', label: 'Stock', get: (p) => p.stock ?? 0, right: true },
+  { key: 'minimo', label: 'Mínimo', get: (p) => p.stock_minimo ?? 0, right: true },
+  {
+    key: 'reponer',
+    label: 'Por reponer',
+    get: (p) => Math.max((p.stock_minimo ?? 0) - (p.stock ?? 0), 0),
+    right: true,
+  },
+  {
+    key: 'valor',
+    label: 'Valor en stock',
+    get: (p) => (p.precio ?? 0) * Math.max(p.stock ?? 0, 0),
+    right: true,
+    money: true,
+  },
+  { key: 'ubicacion', label: 'Ubicación', get: (p) => p.ubicacion ?? '' },
+  { key: 'estado', label: 'Estado', get: (p) => (p.habilitado === false ? 'Deshabilitado' : stockStatus(p)) },
+  { key: 'web', label: 'En web', get: (p) => (p.activo ? 'Sí' : 'No') },
+  { key: 'descripcion', label: 'Descripción', get: (p) => p.descripcion ?? '', maxChars: 120 },
+];
+
+const MOV_COLUMNS: Column<MovItem>[] = [
+  { key: 'fecha', label: 'Fecha', get: (m) => formatDateTime(m.created_at) },
+  { key: 'producto', label: 'Producto', get: (m) => m.producto },
+  { key: 'tipo', label: 'Tipo', get: (m) => (m.tipo === 'entrada' ? 'Entrada' : 'Salida') },
+  { key: 'cantidad', label: 'Cantidad', get: (m) => m.cantidad, right: true },
+  { key: 'motivo', label: 'Motivo', get: (m) => m.motivo ?? '' },
+  { key: 'proveedor', label: 'Proveedor', get: (m) => m.proveedor ?? '' },
+  { key: 'referencia', label: 'Doc. referencia', get: (m) => m.referencia ?? '' },
+  { key: 'usuario', label: 'Usuario', get: (m) => m.usuario ?? '' },
+  { key: 'origen', label: 'Origen', get: (m) => (m.origen === 'web' ? 'Web' : 'Panel') },
+];
+
+const PED_COLUMNS: Column<PedidoRow>[] = [
+  { key: 'fecha', label: 'Fecha', get: (p) => formatDateTime(p.fecha) },
+  { key: 'cliente', label: 'Cliente', get: (p) => p.nombre_cliente ?? '' },
+  { key: 'telefono', label: 'Teléfono', get: (p) => p.telefono ?? '' },
+  { key: 'pago', label: 'Pago', get: (p) => (p.metodo_pago && PAGO_LABEL[p.metodo_pago]) || '' },
+  { key: 'total', label: 'Total', get: (p) => p.total ?? 0, right: true, money: true },
+  { key: 'estado', label: 'Estado', get: (p) => normEstado(p.estado) },
+  { key: 'revisado', label: 'Revisado por', get: (p) => p.revisado_nombre ?? '' },
+  { key: 'revisado_en', label: 'Fecha revisión', get: (p) => formatDateTime(p.revisado_en) },
+  { key: 'motivo', label: 'Motivo rechazo', get: (p) => p.motivo_rechazo ?? '', maxChars: 120 },
+  { key: 'reabierto', label: 'Reabierto por', get: (p) => p.reabierto_nombre ?? '' },
+  { key: 'reabierto_en', label: 'Fecha reapertura', get: (p) => formatDateTime(p.reabierto_en) },
+];
+
+const ALL_KEYS: Record<Source, string[]> = {
+  productos: PRODUCT_COLUMNS.map((c) => c.key),
+  movimientos: MOV_COLUMNS.map((c) => c.key),
+  pedidos: PED_COLUMNS.map((c) => c.key),
+};
+
+/* ---------- Carga de datos ---------- */
+
+async function loadProducts(f: ProdFilter): Promise<ProductItem[]> {
+  const [catRes, prods] = await Promise.all([
+    supabase.from('categorias').select('id, nombre'),
+    fetchAll<ProductRow>((a, b) => supabase.from('productos').select(PRODUCT_FIELDS).order('nombre').range(a, b)),
+  ]);
+  if (catRes.error) throw catRes.error;
+  const names = new Map(((catRes.data ?? []) as CategoryRow[]).map((c) => [c.id, c.nombre]));
+  return prods
+    .filter((p) => (f.deshabilitados || p.habilitado !== false) && (f.categoria === 'all' || p.categoria_id === f.categoria))
+    .map((p) => ({ ...p, categoria: (p.categoria_id && names.get(p.categoria_id)) || 'Sin categoría' }));
+}
+
+async function loadMovements(f: MovFilter): Promise<MovItem[]> {
+  checkRange(f.desde, f.hasta);
+  const [prods, movs] = await Promise.all([
+    fetchAll<ProductName>((a, b) => supabase.from('productos').select('id, nombre').range(a, b)),
+    fetchAll<MovRow>((a, b) => {
+      let q = supabase.from('movimientos').select(MOV_FIELDS);
+      if (f.tipo !== 'all') q = q.eq('tipo', f.tipo);
+      if (f.producto !== 'all') q = q.eq('producto_id', f.producto);
+      if (f.desde) q = q.gte('created_at', dayStart(f.desde));
+      if (f.hasta) q = q.lte('created_at', dayEnd(f.hasta));
+      return q.order('created_at').range(a, b);
+    }),
+  ]);
+  const names = new Map(prods.map((p) => [p.id, p.nombre]));
+  return movs.map((m) => ({ ...m, producto: names.get(m.producto_id) ?? 'Producto eliminado' }));
+}
+
+async function loadPedidos(f: PedFilter): Promise<PedidoRow[]> {
+  checkRange(f.desde, f.hasta);
+  return fetchAll<PedidoRow>((a, b) => {
+    let q = supabase.from('pedidos').select(PED_FIELDS);
+    if (f.estado === 'Pendiente') q = q.or('estado.is.null,estado.ilike.pendiente');
+    else if (f.estado !== 'all') q = q.ilike('estado', f.estado);
+    if (f.pago !== 'all') q = q.eq('metodo_pago', f.pago);
+    if (f.desde) q = q.gte('fecha', dayStart(f.desde));
+    if (f.hasta) q = q.lte('fecha', dayEnd(f.hasta));
+    return q.order('fecha').range(a, b);
+  });
+}
+
+/* ---------- Construcción de cada reporte ---------- */
+
+function categoryText(f: ProdFilter, categories: CategoryRow[]): string {
+  if (f.categoria === 'all') return 'Todas las categorías';
+  return categories.find((c) => c.id === f.categoria)?.nombre ?? 'Categoría';
+}
+
+function movSummary(rows: MovItem[], f: MovFilter): string[] {
+  const units = (t: string) => rows.filter((m) => m.tipo === t).reduce((s, m) => s + m.cantidad, 0);
+  return [
+    `Rango: ${rangeText(f.desde, f.hasta)}`,
+    `Movimientos: ${rows.length}`,
+    `Unidades entrada: ${units('entrada')}`,
+    `Unidades salida: ${units('salida')}`,
+  ];
+}
+
+function pedSummary(rows: PedidoRow[], f: PedFilter): string[] {
+  const count = (e: string) => rows.filter((p) => normEstado(p.estado) === e).length;
+  const aprobado = rows
+    .filter((p) => normEstado(p.estado) === 'Aprobado')
+    .reduce((s, p) => s + (p.total ?? 0), 0);
+  return [
+    `Rango: ${rangeText(f.desde, f.hasta)}`,
+    `Pedidos: ${rows.length} (${count('Pendiente')} pend., ${count('Aprobado')} aprob., ${count('Rechazado')} rech.)`,
+    `Total aprobado: ${formatMoney(aprobado)}`,
+  ];
+}
+
+async function buildInventario(f: ProdFilter, categories: CategoryRow[]): Promise<ExportSpec<ProductItem>> {
+  const rows = await loadProducts(f);
+  const units = rows.reduce((s, p) => s + Math.max(p.stock ?? 0, 0), 0);
+  const value = rows.reduce((s, p) => s + (p.precio ?? 0) * Math.max(p.stock ?? 0, 0), 0);
+  return {
+    title: 'Inventario completo',
+    file: 'inventario_completo',
+    columns: pick(PRODUCT_COLUMNS, ['sku', 'barras', 'nombre', 'categoria', 'precio', 'stock', 'minimo', 'valor', 'ubicacion', 'estado', 'web']),
+    rows,
+    summary: [categoryText(f, categories), `Productos: ${rows.length}`, `Unidades: ${units}`, `Valor total: ${formatMoney(value)}`],
+    totals: { nombre: 'TOTAL', stock: units, valor: value },
+  };
+}
+
+async function buildStockBajo(f: ProdFilter, categories: CategoryRow[]): Promise<ExportSpec<ProductItem>> {
+  const rows = (await loadProducts({ ...f, deshabilitados: false })).filter((p) => stockStatus(p) === 'Stock bajo');
+  return {
+    title: 'Productos con stock bajo',
+    file: 'stock_bajo',
+    columns: pick(PRODUCT_COLUMNS, ['sku', 'nombre', 'categoria', 'stock', 'minimo', 'reponer', 'ubicacion']),
+    rows,
+    summary: [categoryText(f, categories), `Productos: ${rows.length}`],
+  };
+}
+
+async function buildAgotados(f: ProdFilter, categories: CategoryRow[]): Promise<ExportSpec<ProductItem>> {
+  const rows = (await loadProducts({ ...f, deshabilitados: false })).filter((p) => stockStatus(p) === 'Agotado');
+  return {
+    title: 'Productos agotados',
+    file: 'agotados',
+    columns: pick(PRODUCT_COLUMNS, ['sku', 'barras', 'nombre', 'categoria', 'stock', 'minimo', 'ubicacion']),
+    rows,
+    summary: [categoryText(f, categories), `Productos: ${rows.length}`],
+  };
+}
+
+async function buildMovimientos(f: MovFilter): Promise<ExportSpec<MovItem>> {
+  const rows = await loadMovements(f);
+  return { title: 'Movimientos de inventario', file: 'movimientos', columns: MOV_COLUMNS, rows, summary: movSummary(rows, f) };
+}
+
+async function buildPedidos(f: PedFilter): Promise<ExportSpec<PedidoRow>> {
+  const rows = await loadPedidos(f);
+  return { title: 'Pedidos web', file: 'pedidos_web', columns: PED_COLUMNS, rows, summary: pedSummary(rows, f) };
+}
+
+/* ---------- Página ---------- */
 
 export default function ReportesPage() {
-  const [loading, setLoading] = useState(false);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [productNames, setProductNames] = useState<ProductName[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
+  const [invF, setInvF] = useState<ProdFilter>(EMPTY_PROD);
+  const [lowF, setLowF] = useState<ProdFilter>(EMPTY_PROD);
+  const [outF, setOutF] = useState<ProdFilter>(EMPTY_PROD);
+  const [movF, setMovF] = useState<MovFilter>(EMPTY_MOV);
+  const [pedF, setPedF] = useState<PedFilter>(EMPTY_PED);
+
+  const [source, setSource] = useState<Source>('productos');
+  const [customCols, setCustomCols] = useState<Record<Source, string[]>>(ALL_KEYS);
+  const [cProdF, setCProdF] = useState<ProdFilter>(EMPTY_PROD);
+  const [cMovF, setCMovF] = useState<MovFilter>(EMPTY_MOV);
+  const [cPedF, setCPedF] = useState<PedFilter>(EMPTY_PED);
+
+  // Listas para los filtros (categorías y nombres de productos)
   useEffect(() => {
-    async function loadProducts() {
-      const { data } = await supabase.from('productos').select('*, categorias(name)');
-      setProducts(data || []);
+    let cancelled = false;
+    async function loadLists() {
+      const [catRes, prodRes] = await Promise.all([
+        supabase.from('categorias').select('id, nombre').order('nombre'),
+        supabase.from('productos').select('id, nombre').order('nombre'),
+      ]);
+      if (cancelled) return;
+      const failed = catRes.error ?? prodRes.error;
+      if (failed) setError(`No se pudieron cargar los filtros: ${failed.message}`);
+      setCategories((catRes.data ?? []) as CategoryRow[]);
+      setProductNames((prodRes.data ?? []) as ProductName[]);
     }
-    loadProducts();
+    loadLists();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const exportToExcel = (type: 'all' | 'low' | 'out') => {
-    let filtered = products;
-    let fileName = 'Inventario_Completo.xlsx';
-
-    if (type === 'low') {
-      filtered = products.filter(p => (p.stock ?? 0) <= (p.stock_min ?? 0) && (p.stock ?? 0) > 0);
-      fileName = 'Stock_Bajo.xlsx';
-    } else if (type === 'out') {
-      filtered = products.filter(p => (p.stock ?? 0) <= 0);
-      fileName = 'Productos_Agotados.xlsx';
+  async function run<T>(format: Format, build: () => Promise<ExportSpec<T>>) {
+    setNotice(null);
+    setError(null);
+    try {
+      const spec = await build();
+      if (spec.rows.length === 0) {
+        setNotice(`"${spec.title}": no hay datos con esos filtros.`);
+        return;
+      }
+      await exportReport(spec, format);
+      setNotice(`Se generó "${spec.title}" en ${format === 'excel' ? 'Excel' : 'PDF'} (${spec.rows.length} filas).`);
+    } catch (e) {
+      setError(errorMessage(e));
     }
+  }
 
-    const data = filtered.map(p => ({
-      Código: p.sku,
-      Nombre: p.nombre,
-      Categoría: (p as any).categorias?.name || 'N/A',
-      Stock: p.stock,
-      Mínimo: p.stock_min,
-      Ubicación: p.ubicacion
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Inventario');
-    XLSX.writeFile(wb, fileName);
-  };
-
-  const exportToPDF = (type: 'all' | 'low' | 'out') => {
-    const doc = new jsPDF();
-    let filtered = products;
-    let title = 'Reporte de Inventario Completo';
-
-    if (type === 'low') {
-      filtered = products.filter(p => (p.stock ?? 0) <= (p.stock_min ?? 0) && (p.stock ?? 0) > 0);
-      title = 'Reporte de Stock Bajo';
-    } else if (type === 'out') {
-      filtered = products.filter(p => (p.stock ?? 0) <= 0);
-      title = 'Reporte de Productos Agotados';
+  function runCustom(format: Format): Promise<void> {
+    const keys = customCols[source];
+    if (keys.length === 0) {
+      setNotice(null);
+      setError('Elige al menos una columna.');
+      return Promise.resolve();
     }
-
-    doc.setFontSize(18);
-    doc.text(title, 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 28);
-
-    const tableData = filtered.map(p => [
-      p.sku,
-      p.nombre,
-      (p as any).categorias?.name || 'N/A',
-      p.stock ?? 0,
-      p.stock_min ?? 0,
-      p.ubicacion || '—'
-    ]);
-
-    (doc as any).autoTable({
-      startY: 35,
-      head: [['SKU', 'Nombre', 'Categoría', 'Stock', 'Mín', 'Ubicación']],
-      body: tableData,
+    const base = { title: `Reporte personalizado - ${SOURCE_LABEL[source]}`, file: `personalizado_${source}` };
+    if (source === 'productos') {
+      return run(format, async () => {
+        const rows = await loadProducts(cProdF);
+        return { ...base, columns: pick(PRODUCT_COLUMNS, keys), rows, summary: [categoryText(cProdF, categories), `Productos: ${rows.length}`] };
+      });
+    }
+    if (source === 'movimientos') {
+      return run(format, async () => {
+        const rows = await loadMovements(cMovF);
+        return { ...base, columns: pick(MOV_COLUMNS, keys), rows, summary: movSummary(rows, cMovF) };
+      });
+    }
+    return run(format, async () => {
+      const rows = await loadPedidos(cPedF);
+      return { ...base, columns: pick(PED_COLUMNS, keys), rows, summary: pedSummary(rows, cPedF) };
     });
+  }
 
-    doc.save(`${title}.pdf`);
-  };
+  function toggleColumn(key: string) {
+    setCustomCols((prev) => {
+      const current = prev[source];
+      const next = current.includes(key)
+        ? current.filter((k) => k !== key)
+        : ALL_KEYS[source].filter((k) => k === key || current.includes(k)); // mantiene el orden original
+      return { ...prev, [source]: next };
+    });
+  }
+
+  const sourceColumns: { key: string; label: string }[] =
+    source === 'productos' ? PRODUCT_COLUMNS : source === 'movimientos' ? MOV_COLUMNS : PED_COLUMNS;
 
   return (
     <AdminLayout>
-      <div className="space-y-8">
-        <div className="flex items-end justify-between">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">Generación de Reportes</h2>
-            <p className="text-slate-500 text-sm">Exporta la información del inventario en formatos profesionales</p>
-          </div>
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold text-text tracking-tight">Generación de reportes</h2>
+          <p className="text-text-muted text-sm">Exporta la información del inventario en Excel o PDF</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {error && (
+          <Banner tone="danger" onClose={() => setError(null)}>
+            {error}
+          </Banner>
+        )}
+        {notice && (
+          <Banner tone="info" onClose={() => setNotice(null)}>
+            {notice}
+          </Banner>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           <ReportCard
-            title="Inventario Completo"
-            desc="Listado total de productos con stock, precio y ubicación."
-            onExcel={() => exportToExcel('all')}
-            onPDF={() => exportToPDF('all')}
-            icon="📦"
-          />
+            icon={<Package size={22} />}
+            color="blue"
+            title="Inventario completo"
+            desc="Todos los productos con precio, stock, ubicación y valor total del inventario."
+            onExport={(fmt) => run(fmt, () => buildInventario(invF, categories))}
+          >
+            <ProductFilters value={invF} onChange={setInvF} categories={categories} showDisabled />
+          </ReportCard>
+
           <ReportCard
-            title="Productos Stock Bajo"
-            desc="Artículos que requieren reposición inmediata."
-            onExcel={() => exportToExcel('low')}
-            onPDF={() => exportToPDF('low')}
-            icon="⚠"
+            icon={<AlertTriangle size={22} />}
             color="amber"
-          />
+            title="Stock bajo"
+            desc="Artículos en o por debajo del mínimo, con la cantidad por reponer."
+            onExport={(fmt) => run(fmt, () => buildStockBajo(lowF, categories))}
+          >
+            <ProductFilters value={lowF} onChange={setLowF} categories={categories} />
+          </ReportCard>
+
           <ReportCard
-            title="Productos Agotados"
-            desc="Artículos sin existencia disponible para la venta."
-            onExcel={() => exportToExcel('out')}
-            onPDF={() => exportToPDF('out')}
-            icon="⛔"
+            icon={<Ban size={22} />}
             color="red"
-          />
+            title="Agotados"
+            desc="Artículos sin existencias disponibles para la venta."
+            onExport={(fmt) => run(fmt, () => buildAgotados(outF, categories))}
+          >
+            <ProductFilters value={outF} onChange={setOutF} categories={categories} />
+          </ReportCard>
+
+          <ReportCard
+            icon={<ArrowLeftRight size={22} />}
+            color="green"
+            title="Movimientos"
+            desc="Entradas y salidas por rango de fechas, con totales de unidades."
+            onExport={(fmt) => run(fmt, () => buildMovimientos(movF))}
+          >
+            <MovFilters value={movF} onChange={setMovF} products={productNames} />
+          </ReportCard>
+
+          <ReportCard
+            icon={<ShoppingCart size={22} />}
+            color="cyan"
+            title="Pedidos web"
+            desc="Pedidos por rango, con estado, quién los revisó y el total aprobado."
+            onExport={(fmt) => run(fmt, () => buildPedidos(pedF))}
+          >
+            <PedFilters value={pedF} onChange={setPedF} />
+          </ReportCard>
         </div>
+
+        {/* Reporte personalizado */}
+        <ReportCard
+          icon={<SlidersHorizontal size={22} />}
+          color="blue"
+          title="Reporte personalizado"
+          desc="Elige la fuente, marca las columnas que necesitas y aplica filtros."
+          onExport={runCustom}
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="space-y-3">
+              <div>
+                <label className={LABEL}>Fuente de datos</label>
+                <select className={FIELD} value={source} onChange={(e) => setSource(e.target.value as Source)}>
+                  {(Object.keys(SOURCE_LABEL) as Source[]).map((s) => (
+                    <option key={s} value={s}>
+                      {SOURCE_LABEL[s]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {source === 'productos' && (
+                <ProductFilters value={cProdF} onChange={setCProdF} categories={categories} showDisabled />
+              )}
+              {source === 'movimientos' && <MovFilters value={cMovF} onChange={setCMovF} products={productNames} />}
+              {source === 'pedidos' && <PedFilters value={cPedF} onChange={setCPedF} />}
+            </div>
+
+            <div className="lg:col-span-2">
+              <div className="flex items-center justify-between mb-2">
+                <span className={LABEL}>
+                  Columnas ({customCols[source].length} de {ALL_KEYS[source].length})
+                </span>
+                <span className="flex gap-3 text-xs font-semibold">
+                  <button
+                    type="button"
+                    className="text-primary-ink hover:underline"
+                    onClick={() => setCustomCols((p) => ({ ...p, [source]: ALL_KEYS[source] }))}
+                  >
+                    Todas
+                  </button>
+                  <button
+                    type="button"
+                    className="text-text-muted hover:underline"
+                    onClick={() => setCustomCols((p) => ({ ...p, [source]: [] }))}
+                  >
+                    Ninguna
+                  </button>
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {sourceColumns.map((c) => (
+                  <label
+                    key={c.key}
+                    className="flex items-center gap-2 px-3 py-2 border border-border rounded-lg text-sm text-text cursor-pointer hover:bg-bg"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-primary"
+                      checked={customCols[source].includes(c.key)}
+                      onChange={() => toggleColumn(c.key)}
+                    />
+                    {c.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        </ReportCard>
       </div>
     </AdminLayout>
   );
 }
 
-function ReportCard({ title, desc, onExcel, onPDF, icon, color = 'blue' }: any) {
-  const colors: any = {
-    blue: 'bg-blue-50 text-blue-600',
-    amber: 'bg-amber-50 text-amber-600',
-    red: 'bg-red-50 text-red-600',
-  };
+/* ---------- Componentes pequeños ---------- */
+
+const ICON_STYLES = {
+  blue: 'bg-primary-soft text-primary-ink',
+  amber: 'bg-warning-soft text-warning',
+  red: 'bg-danger-soft text-danger',
+  green: 'bg-success-soft text-success',
+  cyan: 'bg-info-soft text-info',
+} as const;
+
+function Banner({
+  tone,
+  onClose,
+  children,
+}: {
+  tone: 'danger' | 'info';
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const cls =
+    tone === 'danger'
+      ? 'bg-danger-soft text-danger border-danger/30'
+      : 'bg-primary-soft text-primary-ink border-primary/20';
+  return (
+    <div className={`border rounded-lg p-4 text-sm flex items-start justify-between gap-3 ${cls}`}>
+      <span>{children}</span>
+      <button type="button" title="Cerrar aviso" onClick={onClose}>
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
+function ReportCard({
+  icon,
+  color,
+  title,
+  desc,
+  children,
+  onExport,
+}: {
+  icon: React.ReactNode;
+  color: keyof typeof ICON_STYLES;
+  title: string;
+  desc: string;
+  children: React.ReactNode;
+  onExport: (format: Format) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<Format | null>(null);
+
+  async function handle(format: Format) {
+    setBusy(format);
+    try {
+      await onExport(format);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const BTN =
+    'flex-1 py-2 text-xs font-semibold bg-surface text-text border border-border rounded-lg hover:bg-bg transition-colors flex items-center justify-center gap-2 disabled:opacity-50';
 
   return (
-    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-4 hover:shadow-md transition-all">
-      <div className="flex items-center gap-4">
-        <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${colors[color]}`}>
-          {icon}
-        </div>
+    <div className={`${CARD} p-6 flex flex-col gap-4`}>
+      <div className="flex items-start gap-4">
+        <div className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center ${ICON_STYLES[color]}`}>{icon}</div>
         <div>
-          <h4 className="font-bold text-slate-900 leading-tight">{title}</h4>
-          <p className="text-xs text-slate-500 mt-1">{desc}</p>
+          <h4 className="font-bold text-text leading-tight">{title}</h4>
+          <p className="text-xs text-text-muted mt-1">{desc}</p>
         </div>
       </div>
-      <div className="flex gap-2 mt-auto pt-4 border-t border-slate-50">
-        <button
-          onClick={onExcel}
-          className="flex-1 py-2 text-xs font-semibold bg-slate-50 text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"
-        >
-          <FileSpreadsheet size={14} /> Excel
+      <div className="space-y-3">{children}</div>
+      <div className="flex gap-2 mt-auto pt-4 border-t border-border">
+        <button type="button" disabled={busy !== null} onClick={() => handle('excel')} className={BTN}>
+          {busy === 'excel' ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} Excel
         </button>
-        <button
-          onClick={onPDF}
-          className="flex-1 py-2 text-xs font-semibold bg-slate-50 text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"
-        >
-          <FileText size={14} /> PDF
+        <button type="button" disabled={busy !== null} onClick={() => handle('pdf')} className={BTN}>
+          {busy === 'pdf' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} PDF
         </button>
       </div>
     </div>
+  );
+}
+
+function ProductFilters({
+  value,
+  onChange,
+  categories,
+  showDisabled = false,
+}: {
+  value: ProdFilter;
+  onChange: (f: ProdFilter) => void;
+  categories: CategoryRow[];
+  showDisabled?: boolean;
+}) {
+  return (
+    <>
+      <div>
+        <label className={LABEL}>Categoría</label>
+        <select className={FIELD} value={value.categoria} onChange={(e) => onChange({ ...value, categoria: e.target.value })}>
+          <option value="all">Todas las categorías</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.nombre}
+            </option>
+          ))}
+        </select>
+      </div>
+      {showDisabled && (
+        <label className="flex items-center gap-2 text-sm text-text cursor-pointer">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-primary"
+            checked={value.deshabilitados}
+            onChange={(e) => onChange({ ...value, deshabilitados: e.target.checked })}
+          />
+          Incluir productos deshabilitados
+        </label>
+      )}
+    </>
+  );
+}
+
+function DateFields({
+  desde,
+  hasta,
+  onChange,
+}: {
+  desde: string;
+  hasta: string;
+  onChange: (desde: string, hasta: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <div>
+        <label className={LABEL}>Desde</label>
+        <input type="date" className={FIELD} value={desde} onChange={(e) => onChange(e.target.value, hasta)} />
+      </div>
+      <div>
+        <label className={LABEL}>Hasta</label>
+        <input type="date" className={FIELD} value={hasta} onChange={(e) => onChange(desde, e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
+function MovFilters({
+  value,
+  onChange,
+  products,
+}: {
+  value: MovFilter;
+  onChange: (f: MovFilter) => void;
+  products: ProductName[];
+}) {
+  return (
+    <>
+      <DateFields desde={value.desde} hasta={value.hasta} onChange={(desde, hasta) => onChange({ ...value, desde, hasta })} />
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className={LABEL}>Tipo</label>
+          <select
+            className={FIELD}
+            value={value.tipo}
+            onChange={(e) => onChange({ ...value, tipo: e.target.value as MovFilter['tipo'] })}
+          >
+            <option value="all">Todos</option>
+            <option value="entrada">Entrada</option>
+            <option value="salida">Salida</option>
+          </select>
+        </div>
+        <div>
+          <label className={LABEL}>Producto</label>
+          <select className={FIELD} value={value.producto} onChange={(e) => onChange({ ...value, producto: e.target.value })}>
+            <option value="all">Todos</option>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nombre}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <p className="text-[11px] text-text-muted">Sin fechas se exporta todo el historial.</p>
+    </>
+  );
+}
+
+function PedFilters({ value, onChange }: { value: PedFilter; onChange: (f: PedFilter) => void }) {
+  return (
+    <>
+      <DateFields desde={value.desde} hasta={value.hasta} onChange={(desde, hasta) => onChange({ ...value, desde, hasta })} />
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className={LABEL}>Estado</label>
+          <select
+            className={FIELD}
+            value={value.estado}
+            onChange={(e) => onChange({ ...value, estado: e.target.value as EstadoFilter })}
+          >
+            <option value="all">Todos</option>
+            <option value="Pendiente">Pendiente</option>
+            <option value="Aprobado">Aprobado</option>
+            <option value="Rechazado">Rechazado</option>
+          </select>
+        </div>
+        <div>
+          <label className={LABEL}>Pago</label>
+          <select
+            className={FIELD}
+            value={value.pago}
+            onChange={(e) => onChange({ ...value, pago: e.target.value as PagoFilter })}
+          >
+            <option value="all">Todos</option>
+            <option value="sinpe">SINPE</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="whatsapp">WhatsApp</option>
+          </select>
+        </div>
+      </div>
+    </>
   );
 }

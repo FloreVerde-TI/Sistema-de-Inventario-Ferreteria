@@ -84,6 +84,20 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="text-sm font-bold text-text mb-4 pb-2 border-b border-border">{children}</h3>;
 }
 
+function CloseButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Cerrar aviso"
+      aria-label="Cerrar aviso"
+      className="p-1 rounded hover:bg-black/10 transition-colors"
+    >
+      <X size={16} />
+    </button>
+  );
+}
+
 function EditarProductoForm() {
   const { id } = useParams<{ id: string }>();
 
@@ -98,11 +112,14 @@ function EditarProductoForm() {
   const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => {
+    let active = true;
+
     async function fetchData() {
       const [catRes, prodRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
         supabase.from('productos').select(PRODUCT_FIELDS).eq('id', id).maybeSingle(),
       ]);
+      if (!active) return;
 
       const failed = catRes.error ?? prodRes.error;
       if (failed) {
@@ -114,10 +131,20 @@ function EditarProductoForm() {
         setCategories((catRes.data ?? []) as CategoryRow[]);
         setForm(toForm(p));
         setStock(p.stock ?? 0);
+        setNotFound(false);
       }
+      setImgFailed(false);
       setLoading(false);
     }
     fetchData();
+
+    // Al salir de la página (o cambiar de producto) se borran los avisos,
+    // así al volver a editar no aparece el mensaje anterior.
+    return () => {
+      active = false;
+      setSuccess(null);
+      setError(null);
+    };
   }, [id]);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -261,7 +288,10 @@ function EditarProductoForm() {
         {header}
 
         {error && (
-          <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-4 text-sm">{error}</div>
+          <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-4 text-sm flex items-center justify-between gap-4">
+            <span>{error}</span>
+            <CloseButton onClick={() => setError(null)} />
+          </div>
         )}
 
         {success && (
@@ -269,9 +299,12 @@ function EditarProductoForm() {
             <span className="flex items-center gap-2">
               <CheckCircle2 size={18} /> {success}
             </span>
-            <Link href="/productos" className="font-semibold underline">
-              Ir a productos
-            </Link>
+            <span className="flex items-center gap-3">
+              <Link href="/productos" className="font-semibold underline">
+                Ir a productos
+              </Link>
+              <CloseButton onClick={() => setSuccess(null)} />
+            </span>
           </div>
         )}
 

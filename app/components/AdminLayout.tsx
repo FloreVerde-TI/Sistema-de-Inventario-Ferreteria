@@ -76,7 +76,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-bg">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
       </div>
     );
@@ -86,12 +86,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     (user.name.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2) || '?').toUpperCase();
 
   return (
-    <div className="flex min-h-screen bg-bg font-sans text-text">
+    <div className="flex min-h-screen font-sans text-text">
       {/* Sidebar */}
-      <aside className="w-64 bg-surface border-r border-border flex flex-col sticky top-0 h-screen">
+      <aside className="w-64 app-sidebar border-r border-border flex flex-col sticky top-0 h-screen">
         <div className="p-6 border-b border-border flex items-center gap-3">
-          <div className="w-9 h-9 bg-gradient-to-br from-primary to-primary-light rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-sm">
-            F
+          {/* Fondo blanco para que el logo se vea igual en modo oscuro */}
+          <div className="w-11 h-11 shrink-0 bg-white rounded-lg flex items-center justify-center overflow-hidden shadow-sm border border-border">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-icono.png" alt="Flore Verde" className="w-full h-full object-contain" />
           </div>
           <div>
             <h1 className="text-sm font-bold leading-none">FerreStock</h1>

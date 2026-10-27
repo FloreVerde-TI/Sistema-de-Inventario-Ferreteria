@@ -2,12 +2,10 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import * as XLSX from 'xlsx';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { Product, Category } from '@/types';
+import { exportReport, type Column, type Format } from '@/lib/exportar';
 import {
   Plus,
   Search,
@@ -104,77 +102,54 @@ async function fetchProductMovements(productId: ProductRow['id']): Promise<Movem
   return all;
 }
 
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('es-CR');
-}
-
 function fileSafe(text: string): string {
   return text.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 40);
 }
 
-function movementFileName(product: ProductRow, ext: 'xlsx' | 'pdf'): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return `movimientos_${fileSafe(product.sku || product.nombre)}_${today}.${ext}`;
-}
+const MOVEMENT_COLUMNS: Column<MovementRow>[] = [
+  { key: 'fecha', label: 'Fecha', get: (m) => new Date(m.created_at).toLocaleString('es-CR') },
+  { key: 'tipo', label: 'Tipo', get: (m) => (m.tipo === 'entrada' ? 'Entrada' : 'Salida') },
+  { key: 'cantidad', label: 'Cantidad', get: (m) => m.cantidad, right: true },
+  { key: 'motivo', label: 'Motivo', get: (m) => m.motivo ?? '', maxChars: 80 },
+  { key: 'proveedor', label: 'Proveedor', get: (m) => m.proveedor ?? '' },
+  { key: 'referencia', label: 'Doc. referencia', get: (m) => m.referencia ?? '' },
+  { key: 'usuario', label: 'Usuario', get: (m) => m.usuario ?? '' },
+  { key: 'origen', label: 'Origen', get: (m) => (m.origen === 'web' ? 'Web' : 'Panel') },
+];
 
-function exportMovementsExcel(product: ProductRow, rows: MovementRow[]) {
-  const data = rows.map((m) => ({
-    Fecha: formatDateTime(m.created_at),
-    Tipo: m.tipo === 'entrada' ? 'Entrada' : 'Salida',
-    Cantidad: m.cantidad,
-    Motivo: m.motivo ?? '',
-    Proveedor: m.proveedor ?? '',
-    'Documento de referencia': m.referencia ?? '',
-    Usuario: m.usuario ?? '',
-    Origen: m.origen ?? '',
-  }));
-  const sheet = XLSX.utils.json_to_sheet(data);
-  const book = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(book, sheet, 'Movimientos');
-  XLSX.writeFile(book, movementFileName(product, 'xlsx'));
-}
-
-function exportMovementsPdf(product: ProductRow, rows: MovementRow[]) {
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const today = new Date().toISOString().slice(0, 10);
-
-  doc.setFontSize(16);
-  doc.text(`Historial de movimientos - ${product.nombre}`, 14, 15);
-  doc.setFontSize(10);
-  doc.text(
-    `Código: ${product.sku ?? '-'}   |   Stock actual: ${product.stock ?? 0}   |   Fecha: ${today}   |   Movimientos: ${rows.length}`,
-    14,
-    21
+function exportMovements(product: ProductRow, rows: MovementRow[], format: Format): Promise<void> {
+  return exportReport(
+    {
+      title: `Historial de movimientos - ${product.nombre}`,
+      file: `movimientos_${fileSafe(product.sku || product.nombre)}`,
+      columns: MOVEMENT_COLUMNS,
+      rows,
+      summary: [`Código: ${product.sku ?? '-'}`, `Stock actual: ${product.stock ?? 0}`, `Movimientos: ${rows.length}`],
+    },
+    format
   );
-
-  autoTable(doc, {
-    startY: 26,
-    head: [['Fecha', 'Tipo', 'Cantidad', 'Motivo', 'Proveedor', 'Doc. referencia', 'Usuario', 'Origen']],
-    body: rows.map((m) => [
-      formatDateTime(m.created_at),
-      m.tipo === 'entrada' ? 'Entrada' : 'Salida',
-      String(m.cantidad),
-      m.motivo ?? '-',
-      m.proveedor ?? '-',
-      m.referencia ?? '-',
-      m.usuario ?? '-',
-      m.origen ?? '-',
-    ]),
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [37, 99, 235] },
-    columnStyles: { 2: { halign: 'right' } },
-  });
-
-  const pages = doc.getNumberOfPages();
-  for (let i = 1; i <= pages; i++) {
-    doc.setPage(i);
-    doc.setFontSize(8);
-    doc.text(`Página ${i} de ${pages}`, doc.internal.pageSize.getWidth() - 14, doc.internal.pageSize.getHeight() - 8, {
-      align: 'right',
-    });
-  }
-  doc.save(movementFileName(product, 'pdf'));
 }
+
+type ProductExportRow = ProductRow & { categoria: string };
+
+const PRODUCT_COLUMNS: Column<ProductExportRow>[] = [
+  { key: 'sku', label: 'Código', get: (p) => p.sku ?? '' },
+  { key: 'barras', label: 'Cód. barras', get: (p) => p.codigo_barras ?? '' },
+  { key: 'nombre', label: 'Nombre', get: (p) => p.nombre },
+  { key: 'categoria', label: 'Categoría', get: (p) => p.categoria },
+  { key: 'precio', label: 'Precio', get: (p) => p.precio ?? 0, right: true, money: true },
+  { key: 'stock', label: 'Stock', get: (p) => p.stock ?? 0, right: true },
+  { key: 'minimo', label: 'Mín.', get: (p) => p.stock_minimo ?? 0, right: true },
+  { key: 'ubicacion', label: 'Ubicación', get: (p) => p.ubicacion ?? '' },
+  {
+    key: 'estado',
+    label: 'Estado',
+    get: (p) => (p.habilitado === false ? 'Deshabilitado' : STATUS_LABEL[getStatus(p.stock, p.stock_minimo)]),
+  },
+  { key: 'web', label: 'En web', get: (p) => (p.activo ? 'Sí' : 'No') },
+  { key: 'descripcion', label: 'Descripción', get: (p) => p.descripcion ?? '', maxChars: 100 },
+  { key: 'imagen', label: 'URL de imagen', get: (p) => p.imagen_principal ?? '', maxChars: 40 },
+];
 
 export default function ProductosPage() {
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -241,76 +216,32 @@ export default function ProductosPage() {
     });
   }, [products, searchTerm, filterCategory, filterStatus, filterWeb]);
 
-  function exportPdf() {
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const today = new Date().toISOString().slice(0, 10);
-
-    doc.setFontSize(16);
-    doc.text('Listado de productos - Flore Verde SRL', 14, 15);
-    doc.setFontSize(10);
-    doc.text(`Fecha: ${today}   |   Productos: ${filteredProducts.length}`, 14, 21);
-
-    autoTable(doc, {
-      startY: 26,
-      head: [['Código', 'Cód. barras', 'Nombre', 'Categoría', 'Stock', 'Mín.', 'Ubicación', 'Estado', 'Web']],
-      body: filteredProducts.map((p) => [
-        p.sku ?? '-',
-        p.codigo_barras ?? '-',
-        p.nombre,
-        (p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría',
-        String(p.stock ?? 0),
-        String(p.stock_minimo ?? 0),
-        p.ubicacion ?? '-',
-        STATUS_LABEL[getStatus(p.stock, p.stock_minimo)],
-        p.activo ? 'Sí' : 'No',
-      ]),
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [37, 99, 235] },
-      columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } },
-    });
-
-    const pages = doc.getNumberOfPages();
-    for (let i = 1; i <= pages; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.text(`Página ${i} de ${pages}`, doc.internal.pageSize.getWidth() - 14, doc.internal.pageSize.getHeight() - 8, {
-        align: 'right',
-      });
-    }
-    doc.save(`productos_${today}.pdf`);
-  }
-
-  function handleExport(format: 'excel' | 'pdf') {
+  async function handleExport(format: Format) {
     setNotice(null);
     setExportOpen(false);
     if (filteredProducts.length === 0) {
       setNotice('No hay productos para exportar con los filtros aplicados.');
       return;
     }
-    if (format === 'pdf') {
-      exportPdf();
-      setNotice(`Se exportaron ${filteredProducts.length} productos a PDF.`);
-      return;
-    }
-    const rows = filteredProducts.map((p) => ({
-      Código: p.sku ?? '',
-      'Código de barras': p.codigo_barras ?? '',
-      Nombre: p.nombre,
-      Categoría: (p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría',
-      Precio: p.precio ?? '',
-      Stock: p.stock ?? 0,
-      'Stock mínimo': p.stock_minimo ?? 0,
-      Ubicación: p.ubicacion ?? '',
-      Estado: STATUS_LABEL[getStatus(p.stock, p.stock_minimo)],
-      'En web': p.activo ? 'Sí' : 'No',
-      Descripción: p.descripcion ?? '',
-      'URL de imagen': p.imagen_principal ?? '',
+    const rows: ProductExportRow[] = filteredProducts.map((p) => ({
+      ...p,
+      categoria: (p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría',
     }));
-    const sheet = XLSX.utils.json_to_sheet(rows);
-    const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, 'Productos');
-    XLSX.writeFile(book, `productos_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    setNotice(`Se exportaron ${rows.length} productos a Excel.`);
+    try {
+      await exportReport(
+        {
+          title: 'Listado de productos',
+          file: 'productos',
+          columns: PRODUCT_COLUMNS,
+          rows,
+          summary: [`Productos: ${rows.length}`],
+        },
+        format
+      );
+      setNotice(`Se exportaron ${rows.length} productos a ${format === 'excel' ? 'Excel' : 'PDF'}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo exportar.');
+    }
   }
 
   function handleDeleted(p: ProductRow) {
@@ -381,8 +312,11 @@ export default function ProductosPage() {
         )}
 
         {notice && (
-          <div className="bg-primary-soft text-primary-ink border border-primary/20 rounded-lg p-4 text-sm">
-            {notice}
+          <div className="bg-primary-soft text-primary-ink border border-primary/20 rounded-lg p-4 text-sm flex items-start justify-between gap-3">
+            <span>{notice}</span>
+            <button type="button" title="Cerrar aviso" onClick={() => setNotice(null)}>
+              <X size={16} />
+            </button>
           </div>
         )}
 
@@ -734,8 +668,7 @@ function DeleteProductModal({
       if (rows.length === 0) {
         setExportedMsg('Este producto no tiene movimientos, no hay nada que exportar.');
       } else {
-        if (format === 'excel') exportMovementsExcel(product, rows);
-        else exportMovementsPdf(product, rows);
+        await exportMovements(product, rows, format);
         setExportedMsg(`Se exportaron ${rows.length} movimientos a ${format === 'excel' ? 'Excel' : 'PDF'}.`);
       }
     } catch (e) {

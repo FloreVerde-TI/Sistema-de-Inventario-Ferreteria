@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { Suspense, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
@@ -234,7 +234,16 @@ async function fetchAll<T>(
 
 /* ---------- Página ---------- */
 
+// Suspense: el rango usa la fecha actual, así Next.js la calcula en cada visita
 export default function DashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <DashboardContent />
+    </Suspense>
+  );
+}
+
+function DashboardContent() {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
   const [slices, setSlices] = useState<CategorySlice[]>([]);
   const [snapLoading, setSnapLoading] = useState(true);

@@ -9,6 +9,7 @@ import { registrarActividad } from '@/lib/actividad';
 import { traerTodo } from '@/lib/paginar';
 import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import SiPuede from '@/components/SiPuede';
+import ImportarProductos from '@/components/ImportarProductos';
 import { Product, Category } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
 import {
@@ -23,6 +24,7 @@ import {
   X,
   ChevronDown,
   FileSpreadsheet,
+  FileUp,
   FileText,
   AlertTriangle,
   Check,
@@ -203,6 +205,8 @@ function ProductosContenido() {
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
   const [filterWeb, setFilterWeb] = useState<WebFilter>('all');
   const [verDeshabilitados, setVerDeshabilitados] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const [recarga, setRecarga] = useState(0); // al cambiar, vuelve a cargar la lista
   const [selected, setSelected] = useState<ProductRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProductRow | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -246,7 +250,7 @@ function ProductosContenido() {
       setLoading(false);
     }
     fetchData();
-  }, []);
+  }, [recarga]);
 
   const categoryName = useMemo(() => new Map(categories.map((c) => [c.id, c.nombre])), [categories]);
   const proveedorName = useMemo(() => new Map(proveedores.map((p) => [p.id, p.nombre])), [proveedores]);
@@ -349,6 +353,18 @@ function ProductosContenido() {
                 </div>
               )}
             </div>
+            <SiPuede permiso="productos_crear">
+              <button
+                type="button"
+                onClick={() => {
+                  setNotice(null);
+                  setImportando(true);
+                }}
+                className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2"
+              >
+                <FileUp size={16} /> Importar Excel
+              </button>
+            </SiPuede>
             <SiPuede permiso="productos_crear">
               <Link
                 href="/productos/nuevo"
@@ -536,6 +552,10 @@ function ProductosContenido() {
           proveedor={(selected.proveedor_id && proveedorName.get(selected.proveedor_id)) || '—'}
           onClose={() => setSelected(null)}
         />
+      )}
+
+      {importando && (
+        <ImportarProductos onClose={() => setImportando(false)} onImportado={() => setRecarga((n) => n + 1)} />
       )}
 
       {deleteTarget && (

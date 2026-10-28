@@ -5,11 +5,14 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { registrarActividad } from '@/lib/actividad';
+import SiPuede from '@/components/SiPuede';
 import { Product, Category } from '@/types';
 import { Save, X, Loader2, Package, Globe, CheckCircle2, Power } from 'lucide-react';
 
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
-type ProductRow = Pick<
+type ProveedorRow = { id: string; nombre: string };
+type ProductRow = { proveedor_id: string | null } & Pick<
   Product,
   | 'id'
   | 'nombre'
@@ -31,6 +34,8 @@ interface FormState {
   descripcion: string;
   categoria: string; // id de categoría o NEW_CATEGORY
   nuevaCategoria: string;
+  proveedor: string; // id del proveedor, '' (ninguno) o NEW_PROVEEDOR
+  nuevoProveedor: string;
   precio: string;
   sku: string;
   codigo_barras: string;
@@ -42,9 +47,10 @@ interface FormState {
 }
 
 const NEW_CATEGORY = '__nueva__';
+const NEW_PROVEEDOR = '__nuevo_proveedor__';
 
 const PRODUCT_FIELDS =
-  'id, nombre, descripcion, categoria_id, precio, sku, codigo_barras, stock, stock_minimo, ubicacion, imagen_principal, activo, habilitado';
+  'id, nombre, descripcion, categoria_id, precio, sku, codigo_barras, stock, stock_minimo, ubicacion, imagen_principal, activo, habilitado, proveedor_id';
 
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
 const FIELD =
@@ -69,6 +75,8 @@ function toForm(p: ProductRow): FormState {
     descripcion: p.descripcion ?? '',
     categoria: p.categoria_id ?? '',
     nuevaCategoria: '',
+    proveedor: p.proveedor_id ?? '',
+    nuevoProveedor: '',
     precio: p.precio === null || p.precio === undefined ? '' : String(p.precio),
     sku: p.sku ?? '',
     codigo_barras: p.codigo_barras ?? '',
@@ -103,7 +111,9 @@ function EditarProductoForm() {
 
   const [form, setForm] = useState<FormState | null>(null);
   const [stock, setStock] = useState(0);
+  const [habilitadoOriginal, setHabilitadoOriginal] = useState(true);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [proveedores, setProveedores] = useState<ProveedorRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -115,11 +125,13 @@ function EditarProductoForm() {
     let active = true;
 
     async function fetchData() {
-      const [catRes, prodRes] = await Promise.all([
+      const [catRes, prodRes, provRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
         supabase.from('productos').select(PRODUCT_FIELDS).eq('id', id).maybeSingle(),
+        supabase.from('proveedores').select('id, nombre').order('nombre'),
       ]);
       if (!active) return;
+      setProveedores((provRes.data ?? []) as ProveedorRow[]);
 
       const failed = catRes.error ?? prodRes.error;
       if (failed) {
@@ -127,10 +139,11 @@ function EditarProductoForm() {
       } else if (!prodRes.data) {
         setNotFound(true);
       } else {
-        const p = prodRes.data as ProductRow;
+        const p = prodRes.data as unknown as ProductRow;
         setCategories((catRes.data ?? []) as CategoryRow[]);
         setForm(toForm(p));
         setStock(p.stock ?? 0);
+        setHabilitadoOriginal(p.habilitado !== false);
         setNotFound(false);
       }
       setImgFailed(false);
@@ -167,6 +180,8 @@ function EditarProductoForm() {
     if (!nombre) return setError('Escribe el nombre del producto.');
     if (!form.categoria) return setError('Elige una categoría.');
     if (creatingCategory && !nuevaCat) return setError('Escribe el nombre de la nueva categoría.');
+    if (form.proveedor === NEW_PROVEEDOR && !form.nuevoProveedor.trim())
+      return setError('Escribe el nombre del nuevo proveedor.');
     if (form.precio.trim() === '' || !Number.isFinite(precio) || precio < 0) {
       return setError('El precio debe ser un número igual o mayor a 0.');
     }
@@ -208,6 +223,26 @@ function EditarProductoForm() {
         }
       }
 
+      // 2b. Proveedor (existente, nuevo o ninguno)
+      let proveedorId: string | null = form.proveedor && form.proveedor !== NEW_PROVEEDOR ? form.proveedor : null;
+      if (form.proveedor === NEW_PROVEEDOR) {
+        const nuevoProv = form.nuevoProveedor.trim();
+        const existente = proveedores.find((p) => p.nombre.trim().toLowerCase() === nuevoProv.toLowerCase());
+        if (existente) {
+          proveedorId = existente.id;
+        } else {
+          const { data: prov, error: provErr } = await supabase
+            .from('proveedores')
+            .insert({ nombre: nuevoProv })
+            .select('id, nombre')
+            .single();
+          if (provErr) throw provErr;
+          const creado = prov as ProveedorRow;
+          proveedorId = creado.id;
+          setProveedores((prev) => [...prev, creado].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+        }
+      }
+
       // 3. Actualizar (el stock NO se toca: cambia solo con Entradas/Salidas)
       const visibleEnWeb = form.habilitado && form.enWeb;
       const { error: updErr } = await supabase
@@ -216,6 +251,7 @@ function EditarProductoForm() {
           nombre,
           descripcion: form.descripcion.trim(),
           categoria_id: categoriaId,
+          proveedor_id: proveedorId,
           precio,
           sku: form.sku.trim() || null,
           codigo_barras: barras || null,
@@ -228,8 +264,27 @@ function EditarProductoForm() {
         .eq('id', id);
       if (updErr) throw updErr;
 
+      // Bitácora: edición y, si cambió, habilitar / deshabilitar
+      await registrarActividad({
+        accion: 'editar',
+        entidad: 'producto',
+        entidad_id: id,
+        detalle: `Editó el producto "${nombre}"`,
+      });
+      if (form.habilitado !== habilitadoOriginal) {
+        await registrarActividad({
+          accion: form.habilitado ? 'habilitar' : 'deshabilitar',
+          entidad: 'producto',
+          entidad_id: id,
+          detalle: `${form.habilitado ? 'Habilitó' : 'Deshabilitó'} el producto "${nombre}"`,
+        });
+        setHabilitadoOriginal(form.habilitado);
+      }
+
       setForm((prev) =>
-        prev ? { ...prev, categoria: categoriaId, nuevaCategoria: '', enWeb: visibleEnWeb } : prev
+        prev
+          ? { ...prev, categoria: categoriaId, nuevaCategoria: '', proveedor: proveedorId ?? '', nuevoProveedor: '', enWeb: visibleEnWeb }
+          : prev
       );
       setSuccess(`Producto "${nombre}" actualizado correctamente.`);
     } catch (err) {
@@ -351,6 +406,37 @@ function EditarProductoForm() {
                 </div>
 
                 <div>
+                  <label className={LABEL}>Proveedor</label>
+                  <select
+                    className={FIELD}
+                    value={form.proveedor}
+                    onChange={(e) => {
+                      set('proveedor', e.target.value);
+                      if (e.target.value !== NEW_PROVEEDOR) set('nuevoProveedor', '');
+                    }}
+                  >
+                    <option value="">Sin proveedor</option>
+                    {proveedores.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombre}
+                      </option>
+                    ))}
+                    <option value={NEW_PROVEEDOR}>+ Agregar nuevo proveedor</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={LABEL}>Nuevo proveedor</label>
+                  <input
+                    className={FIELD}
+                    value={form.nuevoProveedor}
+                    onChange={(e) => set('nuevoProveedor', e.target.value)}
+                    disabled={form.proveedor !== NEW_PROVEEDOR}
+                    placeholder={form.proveedor === NEW_PROVEEDOR ? 'Nombre del proveedor' : 'Elige "Agregar nuevo proveedor"'}
+                  />
+                </div>
+
+                <div>
                   <label className={LABEL}>Código (SKU)</label>
                   <input
                     className={FIELD}
@@ -464,6 +550,8 @@ function EditarProductoForm() {
             <div className={`${CARD} p-6 space-y-5`}>
               <SectionTitle>Estado y publicación</SectionTitle>
 
+              {/* Solo quien puede deshabilitar ve este interruptor */}
+              <SiPuede permiso="productos_deshabilitar">
               <label className="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -483,6 +571,7 @@ function EditarProductoForm() {
                   </span>
                 </span>
               </label>
+              </SiPuede>
 
               <label className={`flex items-start gap-3 ${form.habilitado ? 'cursor-pointer' : 'opacity-50'}`}>
                 <input

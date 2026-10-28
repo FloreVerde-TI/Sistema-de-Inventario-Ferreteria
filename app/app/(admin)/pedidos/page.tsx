@@ -3,6 +3,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { registrarActividad } from '@/lib/actividad';
+import SiPuede from '@/components/SiPuede';
+import { usePerfil } from '@/components/AdminLayout';
 import { Product } from '@/types';
 import { Search, Eye, X, Check, Ban, ClipboardCheck, RotateCcw } from 'lucide-react';
 
@@ -318,16 +321,33 @@ export default function PedidosPage() {
                           <td className={TD}>
                             <div className="flex justify-end">
                               {isPending ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setNotice(null);
-                                    setSelected(p);
-                                  }}
-                                  className="px-3 py-1.5 text-xs font-semibold bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors flex items-center gap-1.5"
+                                <SiPuede
+                                  permiso="pedidos_revisar"
+                                  sino={
+                                    <button
+                                      type="button"
+                                      title="Ver pedido"
+                                      onClick={() => {
+                                        setNotice(null);
+                                        setSelected(p);
+                                      }}
+                                      className={ICON_BTN}
+                                    >
+                                      <Eye size={16} />
+                                    </button>
+                                  }
                                 >
-                                  <ClipboardCheck size={14} /> Revisar
-                                </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setNotice(null);
+                                      setSelected(p);
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-semibold bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors flex items-center gap-1.5"
+                                  >
+                                    <ClipboardCheck size={14} /> Revisar
+                                  </button>
+                                </SiPuede>
                               ) : (
                                 <div className="flex items-center gap-1">
                                   <button
@@ -342,6 +362,7 @@ export default function PedidosPage() {
                                     <Eye size={16} />
                                   </button>
                                   {normEstado(p.estado) === 'Aprobado' && (
+                                    <SiPuede permiso="pedidos_reabrir">
                                     <button
                                       type="button"
                                       title="Reabrir pedido"
@@ -353,6 +374,7 @@ export default function PedidosPage() {
                                     >
                                       <RotateCcw size={16} />
                                     </button>
+                                    </SiPuede>
                                   )}
                                 </div>
                               )}
@@ -447,6 +469,12 @@ function ReabrirModal({
       if (!data || data.length === 0) {
         throw new Error('El pedido ya no está aprobado o no hay permisos para modificarlo.');
       }
+      await registrarActividad({
+        accion: 'reabrir',
+        entidad: 'pedido',
+        entidad_id: pedido.id,
+        detalle: `Reabrió el pedido de ${pedido.nombre_cliente || 'cliente'}`,
+      });
       onReopened({ ...pedido, ...changes });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo reabrir el pedido.');
@@ -538,8 +566,10 @@ function PedidoModal({
   const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [motivo, setMotivo] = useState('');
+  const { puede } = usePerfil();
   const estado = normEstado(pedido.estado);
-  const pending = estado === 'Pendiente';
+  // Sin permiso de revisar, el pedido pendiente solo se puede ver
+  const pending = estado === 'Pendiente' && puede('pedidos_revisar');
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -610,6 +640,15 @@ function PedidoModal({
       if (!data || data.length === 0) {
         throw new Error('El pedido ya no está pendiente o no hay permisos para modificarlo.');
       }
+      await registrarActividad({
+        accion: nuevo === 'Aprobado' ? 'aprobar' : 'rechazar',
+        entidad: 'pedido',
+        entidad_id: pedido.id,
+        detalle:
+          nuevo === 'Aprobado'
+            ? `Aprobó el pedido de ${pedido.nombre_cliente || 'cliente'}`
+            : `Rechazó el pedido de ${pedido.nombre_cliente || 'cliente'}. Motivo: ${motivo.trim()}`,
+      });
       onReviewed({ ...pedido, ...changes });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar la decisión.');

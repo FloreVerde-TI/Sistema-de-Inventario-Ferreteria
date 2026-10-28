@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { registrarActividad } from '@/lib/actividad';
+import SiPuede from '@/components/SiPuede';
 import { Product, Category } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
 import {
@@ -23,7 +26,7 @@ import {
   Check,
 } from 'lucide-react';
 
-type ProductRow = Pick<
+type ProductRow = { proveedor_id: string | null } & Pick<
   Product,
   | 'id'
   | 'sku'
@@ -40,6 +43,7 @@ type ProductRow = Pick<
   | 'habilitado'
 >;
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
+type ProveedorRow = { id: string; nombre: string };
 type StockStatus = 'normal' | 'low' | 'out';
 type StatusFilter = 'all' | StockStatus;
 type WebFilter = 'all' | 'web' | 'noweb';
@@ -79,6 +83,7 @@ type MovementRow = {
   origen: string | null;
   proveedor: string | null;
   referencia: string | null;
+  observaciones: string | null;
   created_at: string;
 };
 
@@ -90,7 +95,7 @@ async function fetchProductMovements(productId: ProductRow['id']): Promise<Movem
   for (let from = 0; ; from += MOV_PAGE_SIZE) {
     const { data, error } = await supabase
       .from('movimientos')
-      .select('tipo, cantidad, motivo, usuario, origen, proveedor, referencia, created_at')
+      .select('tipo, cantidad, motivo, usuario, origen, proveedor, referencia, observaciones, created_at')
       .eq('producto_id', productId)
       .order('created_at', { ascending: true })
       .range(from, from + MOV_PAGE_SIZE - 1);
@@ -111,6 +116,7 @@ const MOVEMENT_COLUMNS: Column<MovementRow>[] = [
   { key: 'tipo', label: 'Tipo', get: (m) => (m.tipo === 'entrada' ? 'Entrada' : 'Salida') },
   { key: 'cantidad', label: 'Cantidad', get: (m) => m.cantidad, right: true },
   { key: 'motivo', label: 'Motivo', get: (m) => m.motivo ?? '', maxChars: 80 },
+  { key: 'observaciones', label: 'Observaciones', get: (m) => m.observaciones ?? '', maxChars: 80 },
   { key: 'proveedor', label: 'Proveedor', get: (m) => m.proveedor ?? '' },
   { key: 'referencia', label: 'Doc. referencia', get: (m) => m.referencia ?? '' },
   { key: 'usuario', label: 'Usuario', get: (m) => m.usuario ?? '' },
@@ -130,13 +136,14 @@ function exportMovements(product: ProductRow, rows: MovementRow[], format: Forma
   );
 }
 
-type ProductExportRow = ProductRow & { categoria: string };
+type ProductExportRow = ProductRow & { categoria: string; proveedor: string };
 
 const PRODUCT_COLUMNS: Column<ProductExportRow>[] = [
   { key: 'sku', label: 'Código', get: (p) => p.sku ?? '' },
   { key: 'barras', label: 'Cód. barras', get: (p) => p.codigo_barras ?? '' },
   { key: 'nombre', label: 'Nombre', get: (p) => p.nombre },
   { key: 'categoria', label: 'Categoría', get: (p) => p.categoria },
+  { key: 'proveedor', label: 'Proveedor', get: (p) => p.proveedor },
   { key: 'precio', label: 'Precio', get: (p) => p.precio ?? 0, right: true, money: true },
   { key: 'stock', label: 'Stock', get: (p) => p.stock ?? 0, right: true },
   { key: 'minimo', label: 'Mín.', get: (p) => p.stock_minimo ?? 0, right: true },
@@ -151,13 +158,44 @@ const PRODUCT_COLUMNS: Column<ProductExportRow>[] = [
   { key: 'imagen', label: 'URL de imagen', get: (p) => p.imagen_principal ?? '', maxChars: 40 },
 ];
 
+// Suspense: la página lee ?buscar= (lo usa el buscador rápido de la barra superior)
 export default function ProductosPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProductosContenido />
+    </Suspense>
+  );
+}
+
+function ProductosContenido() {
+  const router = useRouter();
+  const buscarParam = useSearchParams().get('buscar');
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [proveedores, setProveedores] = useState<ProveedorRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(buscarParam ?? '');
+
+  // Si llega una búsqueda desde la barra superior, se aplica y se quita de la dirección
+  // (así, al volver a Productos más tarde, no reaparece)
+  useEffect(() => {
+    if (buscarParam === null) return;
+    setSearchTerm(buscarParam);
+    router.replace('/productos', { scroll: false });
+  }, [buscarParam, router]);
+
+  // Al salir de la pantalla (Nuevo, Editar, otro menú…) los filtros se limpian
+  useEffect(() => {
+    return () => {
+      setSearchTerm('');
+      setFilterCategory('all');
+      setFilterStatus('all');
+      setFilterWeb('all');
+      setNotice(null);
+    };
+  }, []);
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
   const [filterWeb, setFilterWeb] = useState<WebFilter>('all');
@@ -177,14 +215,15 @@ export default function ProductosPage() {
 
   useEffect(() => {
     async function fetchData() {
-      const [catRes, prodRes] = await Promise.all([
+      const [catRes, prodRes, provRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
         supabase
           .from('productos')
           .select(
-            'id, sku, codigo_barras, nombre, descripcion, precio, imagen_principal, activo, categoria_id, stock, stock_minimo, ubicacion, habilitado'
+            'id, sku, codigo_barras, nombre, descripcion, precio, imagen_principal, activo, categoria_id, stock, stock_minimo, ubicacion, habilitado, proveedor_id'
           )
           .order('nombre'),
+        supabase.from('proveedores').select('id, nombre').order('nombre'),
       ]);
 
       const failed = catRes.error ?? prodRes.error;
@@ -193,7 +232,8 @@ export default function ProductosPage() {
         setError(failed.message);
       } else {
         setCategories((catRes.data ?? []) as CategoryRow[]);
-        setProducts((prodRes.data ?? []) as ProductRow[]);
+        setProducts((prodRes.data ?? []) as unknown as ProductRow[]);
+        setProveedores((provRes.data ?? []) as ProveedorRow[]);
       }
       setLoading(false);
     }
@@ -201,6 +241,7 @@ export default function ProductosPage() {
   }, []);
 
   const categoryName = useMemo(() => new Map(categories.map((c) => [c.id, c.nombre])), [categories]);
+  const proveedorName = useMemo(() => new Map(proveedores.map((p) => [p.id, p.nombre])), [proveedores]);
 
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -226,6 +267,7 @@ export default function ProductosPage() {
     const rows: ProductExportRow[] = filteredProducts.map((p) => ({
       ...p,
       categoria: (p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría',
+      proveedor: (p.proveedor_id && proveedorName.get(p.proveedor_id)) || '',
     }));
     try {
       await exportReport(
@@ -296,12 +338,14 @@ export default function ProductosPage() {
                 </div>
               )}
             </div>
-            <Link
-              href="/productos/nuevo"
-              className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center gap-2"
-            >
-              <Plus size={16} /> Nuevo producto
-            </Link>
+            <SiPuede permiso="productos_crear">
+              <Link
+                href="/productos/nuevo"
+                className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center gap-2"
+              >
+                <Plus size={16} /> Nuevo producto
+              </Link>
+            </SiPuede>
           </div>
         </div>
 
@@ -426,9 +470,12 @@ export default function ProductosPage() {
                             >
                               <Eye size={16} />
                             </button>
-                            <Link href={`/productos/${p.id}/editar`} title="Editar" className={ICON_BTN}>
-                              <Edit size={16} />
-                            </Link>
+                            <SiPuede permiso="productos_editar">
+                              <Link href={`/productos/${p.id}/editar`} title="Editar" className={ICON_BTN}>
+                                <Edit size={16} />
+                              </Link>
+                            </SiPuede>
+                            <SiPuede permiso="productos_eliminar">
                             <button
                               type="button"
                               title="Eliminar"
@@ -440,6 +487,7 @@ export default function ProductosPage() {
                             >
                               <Trash2 size={16} />
                             </button>
+                            </SiPuede>
                           </div>
                         </td>
                       </tr>
@@ -464,6 +512,7 @@ export default function ProductosPage() {
         <ProductDetailModal
           product={selected}
           categoria={(selected.categoria_id && categoryName.get(selected.categoria_id)) || 'Sin categoría'}
+          proveedor={(selected.proveedor_id && proveedorName.get(selected.proveedor_id)) || '—'}
           onClose={() => setSelected(null)}
         />
       )}
@@ -529,10 +578,12 @@ function DetailItem({ label, value }: { label: string; value: React.ReactNode })
 function ProductDetailModal({
   product,
   categoria,
+  proveedor,
   onClose,
 }: {
   product: ProductRow;
   categoria: string;
+  proveedor: string;
   onClose: () => void;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
@@ -602,9 +653,8 @@ function ProductDetailModal({
             <DetailItem label="Código de barras" value={product.codigo_barras || '—'} />
             <DetailItem label="Stock actual" value={product.stock ?? 0} />
             <DetailItem label="Stock mínimo" value={product.stock_minimo ?? 0} />
-            <div className="col-span-2">
-              <DetailItem label="Ubicación" value={product.ubicacion || '—'} />
-            </div>
+            <DetailItem label="Proveedor" value={proveedor} />
+            <DetailItem label="Ubicación" value={product.ubicacion || '—'} />
           </div>
 
           <div className="sm:col-span-3">
@@ -616,12 +666,14 @@ function ProductDetailModal({
         </div>
 
         <div className="p-6 border-t border-border flex justify-end gap-3">
-          <Link
-            href={`/productos/${product.id}/editar`}
-            className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors flex items-center gap-2"
-          >
-            <Edit size={16} /> Editar
-          </Link>
+          <SiPuede permiso="productos_editar">
+            <Link
+              href={`/productos/${product.id}/editar`}
+              className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors flex items-center gap-2"
+            >
+              <Edit size={16} /> Editar
+            </Link>
+          </SiPuede>
           <button
             type="button"
             onClick={onClose}
@@ -699,6 +751,12 @@ function DeleteProductModal({
       setError('La base no borró el producto. Revisa los permisos (RLS).');
       return;
     }
+    await registrarActividad({
+      accion: 'eliminar',
+      entidad: 'producto',
+      entidad_id: product.id,
+      detalle: `Eliminó el producto "${product.nombre}"${product.sku ? ` (${product.sku})` : ''}`,
+    });
     onDeleted(product);
   }
 
@@ -720,6 +778,12 @@ function DeleteProductModal({
       setError('La base no deshabilitó el producto. Revisa los permisos (RLS).');
       return;
     }
+    await registrarActividad({
+      accion: 'deshabilitar',
+      entidad: 'producto',
+      entidad_id: product.id,
+      detalle: `Deshabilitó el producto "${product.nombre}"`,
+    });
     onDisabled(product);
   }
 
@@ -790,6 +854,7 @@ function DeleteProductModal({
             {!exportedMsg && <p className="text-xs text-text-muted mt-2">Primero debes exportar el historial.</p>}
           </div>
 
+          <SiPuede permiso="productos_deshabilitar">
           <div className={STEP}>
             <p className="text-sm font-semibold text-text mb-1">¿Prefieres conservarlo?</p>
             <p className="text-xs text-text-muted mb-3">
@@ -804,6 +869,7 @@ function DeleteProductModal({
               {alreadyDisabled ? 'Ya está deshabilitado' : busy === 'disable' ? 'Deshabilitando...' : 'Solo deshabilitar'}
             </button>
           </div>
+          </SiPuede>
         </div>
 
         <div className="p-6 border-t border-border flex justify-end">

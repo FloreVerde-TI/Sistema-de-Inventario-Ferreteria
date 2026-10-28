@@ -4,20 +4,25 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { etiquetaUsuario } from '@/lib/actividad';
+import SiPuede from '@/components/SiPuede';
 import { Product, Movimiento } from '@/types';
 import { Loader2, ArrowDownCircle, ScanLine } from 'lucide-react';
 
-type ProductOption = Pick<Product, 'id' | 'sku' | 'nombre' | 'stock' | 'habilitado'>;
+type ProductOption = Pick<Product, 'id' | 'sku' | 'nombre' | 'stock' | 'habilitado'> & { proveedor_id: string | null };
+type ProveedorRow = { id: string; nombre: string };
 type EntradaRow = Pick<
   Movimiento,
-  'id' | 'producto_id' | 'cantidad' | 'motivo' | 'usuario' | 'proveedor' | 'referencia' | 'created_at'
+  'id' | 'producto_id' | 'cantidad' | 'motivo' | 'usuario' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
 >;
 
 type FormState = {
   producto_id: string;
   cantidad: string;
-  proveedor: string;
+  proveedor: string; // id del proveedor, '' (ninguno) o NEW_PROVEEDOR
+  nuevoProveedor: string;
   referencia: string;
+  observaciones: string;
   motivo: string;
 };
 
@@ -25,7 +30,9 @@ const EMPTY_FORM: FormState = {
   producto_id: '',
   cantidad: '',
   proveedor: '',
+  nuevoProveedor: '',
   referencia: '',
+  observaciones: '',
   motivo: '',
 };
 
@@ -38,6 +45,8 @@ const TH = 'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-so
 const TD = 'px-4 py-3';
 
 const DAYS_BACK = 30;
+const MAX_OBS = 150; // máximo de caracteres de Observaciones
+const NEW_PROVEEDOR = '__nuevo_proveedor__';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('es-CR', {
@@ -53,6 +62,7 @@ export default function EntradasPage() {
   const router = useRouter();
 
   const [products, setProducts] = useState<ProductOption[]>([]);
+  const [proveedores, setProveedores] = useState<ProveedorRow[]>([]);
   const [entradas, setEntradas] = useState<EntradaRow[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
@@ -64,18 +74,19 @@ export default function EntradasPage() {
   const loadData = useCallback(async () => {
     const since = new Date(Date.now() - DAYS_BACK * 24 * 60 * 60 * 1000).toISOString();
 
-    const [prodRes, entRes] = await Promise.all([
+    const [prodRes, entRes, provRes] = await Promise.all([
       supabase
         .from('productos')
-        .select('id, sku, nombre, stock, habilitado')
+        .select('id, sku, nombre, stock, habilitado, proveedor_id')
         .order('nombre'),
       supabase
         .from('movimientos')
-        .select('id, producto_id, cantidad, motivo, usuario, proveedor, referencia, created_at')
+        .select('id, producto_id, cantidad, motivo, usuario, proveedor, referencia, observaciones, created_at')
         .eq('tipo', 'entrada')
         .gte('created_at', since)
         .order('created_at', { ascending: false })
         .limit(50),
+      supabase.from('proveedores').select('id, nombre').eq('activo', true).order('nombre'),
     ]);
 
     const failed = prodRes.error ?? entRes.error;
@@ -84,7 +95,8 @@ export default function EntradasPage() {
       setError(failed.message);
     } else {
       setError(null);
-      setProducts((prodRes.data ?? []) as ProductOption[]);
+      setProducts((prodRes.data ?? []) as unknown as ProductOption[]);
+      setProveedores((provRes.data ?? []) as ProveedorRow[]);
       setEntradas((entRes.data ?? []) as EntradaRow[]);
     }
     setLoading(false);
@@ -108,6 +120,21 @@ export default function EntradasPage() {
   const enabledProducts = useMemo(() => products.filter((p) => p.habilitado !== false), [products]);
   const productName = useMemo(() => new Map(products.map((p) => [p.id, p.nombre])), [products]);
 
+  // Si se llega con un producto ya elegido (desde Código de Barras), se propone su proveedor
+  useEffect(() => {
+    if (!form.producto_id) return;
+    const prov = products.find((p) => p.id === form.producto_id)?.proveedor_id;
+    if (prov) setForm((prev) => (prev.proveedor ? prev : { ...prev, proveedor: prov }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
+
+  // Al elegir un producto, el proveedor se llena solo con el del producto (se puede cambiar)
+  const elegirProducto = (id: string) => {
+    const prov = products.find((p) => p.id === id)?.proveedor_id ?? '';
+    setForm((prev) => ({ ...prev, producto_id: id, proveedor: prov, nuevoProveedor: '' }));
+    setSuccess(null);
+  };
+
   const setField = (key: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     setSuccess(null); // al empezar otro registro, el aviso anterior desaparece
@@ -127,22 +154,41 @@ export default function EntradasPage() {
       setError('La cantidad debe ser un número entero mayor que 0.');
       return;
     }
+    if (form.proveedor === NEW_PROVEEDOR && !form.nuevoProveedor.trim()) {
+      setError('Escribe el nombre del nuevo proveedor.');
+      return;
+    }
 
     setSaving(true);
 
-    // Nombre del usuario que registra la entrada
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    let usuario = user?.email ?? 'Desconocido';
-    if (user) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', user.id)
-        .maybeSingle();
-      usuario = profile?.full_name ?? usuario;
+    // Proveedor: se guarda el nombre en el movimiento (así el historial no cambia si luego se renombra)
+    let proveedorNombre: string | null = null;
+    if (form.proveedor === NEW_PROVEEDOR) {
+      const nuevo = form.nuevoProveedor.trim();
+      const existente = proveedores.find((p) => p.nombre.trim().toLowerCase() === nuevo.toLowerCase());
+      if (existente) {
+        proveedorNombre = existente.nombre;
+      } else {
+        const { data: prov, error: provErr } = await supabase
+          .from('proveedores')
+          .insert({ nombre: nuevo })
+          .select('id, nombre')
+          .single();
+        if (provErr) {
+          setError(`No se pudo crear el proveedor: ${provErr.message}`);
+          setSaving(false);
+          return;
+        }
+        const creado = prov as ProveedorRow;
+        proveedorNombre = creado.nombre;
+        setProveedores((prev) => [...prev, creado].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      }
+    } else if (form.proveedor) {
+      proveedorNombre = proveedores.find((p) => p.id === form.proveedor)?.nombre ?? null;
     }
+
+    // Quien registra la entrada: "Nombre — Rol"
+    const usuario = await etiquetaUsuario();
 
     // tipo SIEMPRE en minúscula: el trigger solo suma stock con 'entrada' exacto
     const { error: insertError } = await supabase.from('movimientos').insert({
@@ -150,10 +196,11 @@ export default function EntradasPage() {
       tipo: 'entrada',
       cantidad,
       motivo: form.motivo.trim() || null,
-      proveedor: form.proveedor.trim() || null,
+      proveedor: proveedorNombre,
       referencia: form.referencia.trim() || null,
       usuario,
       origen: 'panel',
+      observaciones: form.observaciones.trim() || null,
     });
 
     if (insertError) {
@@ -209,7 +256,7 @@ export default function EntradasPage() {
               <select
                 className={FIELD}
                 value={form.producto_id}
-                onChange={(e) => setField('producto_id', e.target.value)}
+                onChange={(e) => elegirProducto(e.target.value)}
               >
                 <option value="">Seleccionar producto…</option>
                 {enabledProducts.map((p) => (
@@ -238,12 +285,33 @@ export default function EntradasPage() {
 
             <div className="flex flex-col gap-1.5">
               <label className={LABEL}>Proveedor</label>
-              <input
-                placeholder="Ej. Distribuidora El Tornillo"
+              <select
                 className={FIELD}
                 value={form.proveedor}
-                onChange={(e) => setField('proveedor', e.target.value)}
-              />
+                onChange={(e) => {
+                  setField('proveedor', e.target.value);
+                  if (e.target.value !== NEW_PROVEEDOR) setField('nuevoProveedor', '');
+                }}
+              >
+                <option value="">Sin proveedor</option>
+                {proveedores.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre}
+                  </option>
+                ))}
+                {/* Agregar proveedores requiere permiso de crear o editar productos */}
+                <SiPuede permiso="productos_crear" sino={<SiPuede permiso="productos_editar"><option value={NEW_PROVEEDOR}>+ Agregar nuevo proveedor</option></SiPuede>}>
+                  <option value={NEW_PROVEEDOR}>+ Agregar nuevo proveedor</option>
+                </SiPuede>
+              </select>
+              {form.proveedor === NEW_PROVEEDOR && (
+                <input
+                  placeholder="Nombre del nuevo proveedor"
+                  className={FIELD}
+                  value={form.nuevoProveedor}
+                  onChange={(e) => setField('nuevoProveedor', e.target.value)}
+                />
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -264,6 +332,21 @@ export default function EntradasPage() {
                 value={form.motivo}
                 onChange={(e) => setField('motivo', e.target.value)}
               />
+            </div>
+
+            <div className="col-span-2 flex flex-col gap-1.5">
+              <label className={LABEL}>Observaciones (opcional)</label>
+              <textarea
+                rows={2}
+                maxLength={MAX_OBS}
+                placeholder="Ej. Llegó una caja golpeada, se revisó y está bien"
+                className={`${FIELD} resize-none`}
+                value={form.observaciones}
+                onChange={(e) => setField('observaciones', e.target.value)}
+              />
+              <span className="text-[11px] text-text-muted text-right">
+                {form.observaciones.length}/{MAX_OBS}
+              </span>
             </div>
           </div>
 
@@ -326,7 +409,17 @@ export default function EntradasPage() {
                         <td className={`${TD} text-text-soft`}>{m.proveedor || '—'}</td>
                         <td className={`${TD} text-right font-semibold text-success`}>+{m.cantidad}</td>
                         <td className={`${TD} text-text-soft`}>{m.referencia || '—'}</td>
-                        <td className={`${TD} text-text-soft`}>{m.motivo || '—'}</td>
+                        <td className={`${TD} text-text-soft`}>
+                          {m.motivo || '—'}
+                          {m.observaciones && (
+                            <div
+                              title={m.observaciones}
+                              className="text-xs text-text-muted mt-0.5 italic max-w-xs line-clamp-2 [overflow-wrap:anywhere]"
+                            >
+                              {m.observaciones}
+                            </div>
+                          )}
+                        </td>
                         <td className={`${TD} text-text-soft`}>{m.usuario || '—'}</td>
                       </tr>
                     ))

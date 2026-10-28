@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { registrarActividad } from '@/lib/actividad';
+import { traerTodo } from '@/lib/paginar';
+import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import SiPuede from '@/components/SiPuede';
 import { Product, Category } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
@@ -193,12 +195,14 @@ function ProductosContenido() {
       setFilterCategory('all');
       setFilterStatus('all');
       setFilterWeb('all');
+      setVerDeshabilitados(false);
       setNotice(null);
     };
   }, []);
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
   const [filterWeb, setFilterWeb] = useState<WebFilter>('all');
+  const [verDeshabilitados, setVerDeshabilitados] = useState(false);
   const [selected, setSelected] = useState<ProductRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProductRow | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -217,12 +221,16 @@ function ProductosContenido() {
     async function fetchData() {
       const [catRes, prodRes, provRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
-        supabase
-          .from('productos')
-          .select(
-            'id, sku, codigo_barras, nombre, descripcion, precio, imagen_principal, activo, categoria_id, stock, stock_minimo, ubicacion, habilitado, proveedor_id'
-          )
-          .order('nombre'),
+        traerTodo((a, b) =>
+          supabase
+            .from('productos')
+            .select(
+              'id, sku, codigo_barras, nombre, descripcion, precio, imagen_principal, activo, categoria_id, stock, stock_minimo, ubicacion, habilitado, proveedor_id'
+            )
+            .order('nombre')
+            .order('id')
+            .range(a, b)
+        ),
         supabase.from('proveedores').select('id, nombre').order('nombre'),
       ]);
 
@@ -253,9 +261,12 @@ function ProductosContenido() {
         filterStatus === 'all' || getStatus(p.stock, p.stock_minimo) === filterStatus;
       const matchesWeb =
         filterWeb === 'all' || (filterWeb === 'web' ? p.activo === true : p.activo !== true);
-      return matchesSearch && matchesCategory && matchesStatus && matchesWeb;
+      // Los deshabilitados se ocultan, salvo que se marque la casilla o se esté buscando
+      const matchesHabilitado = p.habilitado !== false || verDeshabilitados || !!term;
+      return matchesSearch && matchesCategory && matchesStatus && matchesWeb && matchesHabilitado;
     });
-  }, [products, searchTerm, filterCategory, filterStatus, filterWeb]);
+  }, [products, searchTerm, filterCategory, filterStatus, filterWeb, verDeshabilitados]);
+  const totalDeshabilitados = useMemo(() => products.filter((p) => p.habilitado === false).length, [products]);
 
   async function handleExport(format: Format) {
     setNotice(null);
@@ -402,6 +413,16 @@ function ProductosContenido() {
             <option value="web">En Web</option>
             <option value="noweb">No en Web</option>
           </select>
+
+          <label className="flex items-center gap-2 text-sm text-text cursor-pointer whitespace-nowrap">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-primary"
+              checked={verDeshabilitados}
+              onChange={(e) => setVerDeshabilitados(e.target.checked)}
+            />
+            Mostrar deshabilitados ({totalDeshabilitados})
+          </label>
         </div>
 
         {/* Tabla */}
@@ -702,7 +723,24 @@ function DeleteProductModal({
   const [exportedMsg, setExportedMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [blocked, setBlocked] = useState(false);
+  const [enPedidos, setEnPedidos] = useState<number | null>(null); // null = revisando
   const alreadyDisabled = product.habilitado === false;
+
+  // ¿Aparece en pedidos web? Si sí, no se puede borrar (se perdería el historial de esos pedidos)
+  useEffect(() => {
+    let cancelado = false;
+    supabase
+      .from('detalle_pedido')
+      .select('id', { count: 'exact', head: true })
+      .eq('producto_id', product.id)
+      .then(({ count }) => {
+        if (!cancelado) setEnPedidos(count ?? 0);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [product.id]);
+  const conPedidos = (enPedidos ?? 0) > 0;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -751,6 +789,7 @@ function DeleteProductModal({
       setError('La base no borró el producto. Revisa los permisos (RLS).');
       return;
     }
+    await borrarImagenSiEsNuestra(product.imagen_principal);
     await registrarActividad({
       accion: 'eliminar',
       entidad: 'producto',
@@ -808,9 +847,19 @@ function DeleteProductModal({
         </div>
 
         <div className="p-6 space-y-4">
-          <p className="text-sm text-text-soft">
-            Borrar elimina el producto y todo su historial de movimientos. No se puede deshacer.
-          </p>
+          {enPedidos === null ? (
+            <p className="text-sm text-text-muted italic">Revisando si el producto tiene pedidos web...</p>
+          ) : conPedidos ? (
+            <div className="bg-info-soft text-sky-900 border border-sky-200 rounded-lg p-3 text-sm">
+              Este producto aparece en <strong>{enPedidos}</strong> {enPedidos === 1 ? 'pedido web' : 'pedidos web'}, así que
+              no se puede borrar: se perdería el historial de esos pedidos. Puedes <strong>deshabilitarlo</strong>: deja de
+              usarse en Entradas, Salidas y la web, pero se conserva todo.
+            </div>
+          ) : (
+            <p className="text-sm text-text-soft">
+              Borrar elimina el producto y todo su historial de movimientos. No se puede deshacer.
+            </p>
+          )}
 
           {error && (
             <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-3 text-sm">{error}</div>
@@ -823,6 +872,8 @@ function DeleteProductModal({
             </div>
           )}
 
+          {enPedidos !== null && !conPedidos && (
+          <>
           <div className={STEP}>
             <p className="text-sm font-semibold text-text mb-3">1. Exporta el historial de movimientos</p>
             <div className="flex gap-3">
@@ -853,6 +904,8 @@ function DeleteProductModal({
             </button>
             {!exportedMsg && <p className="text-xs text-text-muted mt-2">Primero debes exportar el historial.</p>}
           </div>
+          </>
+          )}
 
           <SiPuede permiso="productos_deshabilitar">
           <div className={STEP}>

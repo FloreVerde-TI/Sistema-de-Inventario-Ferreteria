@@ -15,6 +15,7 @@ type PagoFilter = 'all' | 'sinpe' | 'transferencia' | 'whatsapp';
 
 type PedidoRow = {
   id: string;
+  codigo: string | null; // ej. 0413332D (el mismo del WhatsApp)
   nombre_cliente: string | null;
   telefono: string | null;
   total: number | null;
@@ -35,7 +36,7 @@ type Filters = { search: string; desde: string; hasta: string; estado: EstadoFil
 const EMPTY_FILTERS: Filters = { search: '', desde: '', hasta: '', estado: 'all', pago: 'all' };
 const PAGE_SIZE = 20;
 const COLUMNS =
-  'id, nombre_cliente, telefono, total, estado, fecha, metodo_pago, revisado_nombre, revisado_en, motivo_rechazo, reabierto_nombre, reabierto_en';
+  'id, codigo, nombre_cliente, telefono, total, estado, fecha, metodo_pago, revisado_nombre, revisado_en, motivo_rechazo, reabierto_nombre, reabierto_en';
 
 // Un pedido sin estado (null) o con "pendiente" en minúscula cuenta como Pendiente
 const PENDIENTE_COND = 'or(estado.is.null,estado.ilike.pendiente)';
@@ -102,6 +103,16 @@ export default function PedidosPage() {
   const [selected, setSelected] = useState<PedidoRow | null>(null);
   const [reopening, setReopening] = useState<PedidoRow | null>(null);
 
+  // Al salir de la pantalla, filtros, búsqueda y página vuelven a empezar
+  useEffect(() => {
+    return () => {
+      setDraft(EMPTY_FILTERS);
+      setApplied(EMPTY_FILTERS);
+      setPage(1);
+      setNotice(null);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -120,8 +131,9 @@ export default function PedidosPage() {
       if (applied.desde) query = query.gte('fecha', new Date(`${applied.desde}T00:00:00`).toISOString());
       if (applied.hasta) query = query.lte('fecha', new Date(`${applied.hasta}T23:59:59.999`).toISOString());
 
-      const term = applied.search.trim().replace(/[,()%*]/g, ' ').trim();
-      if (term) conds.push(`or(nombre_cliente.ilike.%${term}%,telefono.ilike.%${term}%)`);
+      // Se quita el "#" para poder pegar el código tal como llega por WhatsApp
+      const term = applied.search.trim().replace(/[,()%*#]/g, ' ').trim();
+      if (term) conds.push(`or(codigo.ilike.%${term}%,nombre_cliente.ilike.%${term}%,telefono.ilike.%${term}%)`);
 
       if (conds.length > 0) query = query.or(`and(${conds.join(',')})`);
 
@@ -166,8 +178,8 @@ export default function PedidosPage() {
     setSelected(null);
     setNotice(
       updated.estado === 'Aprobado'
-        ? `Pedido de ${updated.nombre_cliente ?? 'cliente'} aprobado.`
-        : `Pedido de ${updated.nombre_cliente ?? 'cliente'} rechazado. El stock se devolvió al inventario.`
+        ? `Pedido #${updated.codigo ?? ''} de ${updated.nombre_cliente ?? 'cliente'} aprobado.`
+        : `Pedido #${updated.codigo ?? ''} de ${updated.nombre_cliente ?? 'cliente'} rechazado. El stock se devolvió al inventario.`
     );
   }
 
@@ -211,7 +223,7 @@ export default function PedidosPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" size={18} />
             <input
               type="text"
-              placeholder="Buscar por cliente o teléfono…"
+              placeholder="Buscar por código (#0413332D), cliente o teléfono…"
               className={`${FIELD} w-full pl-10 pr-4`}
               value={draft.search}
               onChange={(e) => setDraftField('search', e.target.value)}
@@ -276,6 +288,7 @@ export default function PedidosPage() {
                 <thead className="bg-surface-alt border-b border-border">
                   <tr>
                     <th className={TH}>Fecha</th>
+                    <th className={TH}>Código</th>
                     <th className={TH}>Cliente</th>
                     <th className={TH}>Teléfono</th>
                     <th className={TH}>Pago</th>
@@ -292,6 +305,9 @@ export default function PedidosPage() {
                       return (
                         <tr key={p.id} className="hover:bg-surface-alt transition-colors">
                           <td className={`${TD} text-text-soft whitespace-nowrap`}>{formatDate(p.fecha)}</td>
+                          <td className={`${TD} font-mono font-semibold text-text whitespace-nowrap`}>
+                            {p.codigo ? `#${p.codigo}` : '—'}
+                          </td>
                           <td className={`${TD} font-medium text-text`}>{p.nombre_cliente || '—'}</td>
                           <td className={`${TD} text-text-soft`}>{p.telefono || '—'}</td>
                           <td className={`${TD} text-text-soft`}>
@@ -385,7 +401,7 @@ export default function PedidosPage() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={8} className="px-6 py-20 text-center text-text-muted italic">
+                      <td colSpan={9} className="px-6 py-20 text-center text-text-muted italic">
                         {total === 0 && noFilters
                           ? 'Aún no hay pedidos web.'
                           : 'No se encontraron pedidos con los filtros aplicados.'}
@@ -473,7 +489,7 @@ function ReabrirModal({
         accion: 'reabrir',
         entidad: 'pedido',
         entidad_id: pedido.id,
-        detalle: `Reabrió el pedido de ${pedido.nombre_cliente || 'cliente'}`,
+        detalle: `Reabrió el pedido #${pedido.codigo ?? ''} de ${pedido.nombre_cliente || 'cliente'}`,
       });
       onReopened({ ...pedido, ...changes });
     } catch (e) {
@@ -646,8 +662,8 @@ function PedidoModal({
         entidad_id: pedido.id,
         detalle:
           nuevo === 'Aprobado'
-            ? `Aprobó el pedido de ${pedido.nombre_cliente || 'cliente'}`
-            : `Rechazó el pedido de ${pedido.nombre_cliente || 'cliente'}. Motivo: ${motivo.trim()}`,
+            ? `Aprobó el pedido #${pedido.codigo ?? ''} de ${pedido.nombre_cliente || 'cliente'}`
+            : `Rechazó el pedido #${pedido.codigo ?? ''} de ${pedido.nombre_cliente || 'cliente'}. Motivo: ${motivo.trim()}`,
       });
       onReviewed({ ...pedido, ...changes });
     } catch (e) {
@@ -669,7 +685,9 @@ function PedidoModal({
       <div className={`${CARD} w-full max-w-2xl max-h-[90vh] overflow-y-auto`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 p-6 border-b border-border">
           <div>
-            <h3 className="text-lg font-bold text-text">Pedido de {pedido.nombre_cliente || 'cliente'}</h3>
+            <h3 className="text-lg font-bold text-text">
+              Pedido {pedido.codigo ? `#${pedido.codigo} ` : ''}de {pedido.nombre_cliente || 'cliente'}
+            </h3>
             <div className="mt-2">
               <EstadoBadge estado={pedido.estado} />
             </div>

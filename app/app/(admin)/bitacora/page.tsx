@@ -99,6 +99,16 @@ export default function BitacoraPage() {
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
+  // Al salir de la pantalla, filtros, búsqueda y página vuelven a empezar
+  useEffect(() => {
+    return () => {
+      setDraft(VACIOS);
+      setApplied(VACIOS);
+      setPage(1);
+      setNotice(null);
+    };
+  }, []);
+
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false);

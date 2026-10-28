@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { registrarActividad } from '@/lib/actividad';
+import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
+import SubirImagen from '@/components/SubirImagen';
 import { Building2, Package, FileText, Image as ImageIcon, Save, Loader2, X } from 'lucide-react';
 
 type Config = {
@@ -166,6 +168,10 @@ export default function ConfigPage() {
       entidad_id: '1',
       detalle: `Cambió: ${cambios.join(', ')}`,
     });
+    // Logo reemplazado o quitado: se borra el anterior de nuestro Storage
+    if (original.logo_url.trim() && original.logo_url.trim() !== form.logo_url.trim()) {
+      await borrarImagenSiEsNuestra(original.logo_url.trim());
+    }
     setOriginal(form);
     setActualizado(ahora);
     setAviso({ tipo: 'exito', texto: 'Configuración guardada. Los reportes nuevos ya usan estos datos.' });
@@ -317,8 +323,16 @@ export default function ConfigPage() {
                     <img src={logoUrl} alt="Logo" className="w-full h-full object-contain p-2" onError={() => setLogoFallo(true)} />
                   )}
                 </div>
-                <div className="flex-1">
-                  <label className={LABEL}>URL del logo</label>
+                <div className="flex-1 space-y-3">
+                  <SubirImagen
+                    carpeta="empresa"
+                    texto="Subir logo"
+                    onSubida={(url) => {
+                      set('logo_url', url);
+                      setLogoFallo(false);
+                    }}
+                  />
+                  <label className={LABEL}>O pega el enlace del logo</label>
                   <input
                     className={FIELD}
                     value={form.logo_url}
@@ -328,8 +342,8 @@ export default function ConfigPage() {
                     }}
                     placeholder="https://... (opcional)"
                   />
-                  <p className="text-xs text-text-muted mt-2">
-                    Pronto podrás subir la imagen directamente (paso de Imágenes). Por ahora, pega un enlace público.
+                  <p className="text-xs text-text-muted">
+                    Se usa en los reportes PDF. Recuerda presionar &quot;Guardar cambios&quot;. Si lo dejas vacío, se usa el logo del sistema.
                   </p>
                 </div>
               </div>

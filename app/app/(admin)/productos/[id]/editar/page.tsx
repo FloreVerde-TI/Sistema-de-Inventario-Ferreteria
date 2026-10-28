@@ -7,6 +7,8 @@ import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { registrarActividad } from '@/lib/actividad';
 import SiPuede from '@/components/SiPuede';
+import SubirImagen from '@/components/SubirImagen';
+import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import { Product, Category } from '@/types';
 import { Save, X, Loader2, Package, Globe, CheckCircle2, Power } from 'lucide-react';
 
@@ -112,6 +114,7 @@ function EditarProductoForm() {
   const [form, setForm] = useState<FormState | null>(null);
   const [stock, setStock] = useState(0);
   const [habilitadoOriginal, setHabilitadoOriginal] = useState(true);
+  const [imagenOriginal, setImagenOriginal] = useState('');
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [proveedores, setProveedores] = useState<ProveedorRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,6 +147,7 @@ function EditarProductoForm() {
         setForm(toForm(p));
         setStock(p.stock ?? 0);
         setHabilitadoOriginal(p.habilitado !== false);
+        setImagenOriginal(p.imagen_principal ?? '');
         setNotFound(false);
       }
       setImgFailed(false);
@@ -263,6 +267,13 @@ function EditarProductoForm() {
         })
         .eq('id', id);
       if (updErr) throw updErr;
+
+      // Si se cambió o quitó la imagen, se borra la anterior de nuestro Storage
+      const imagenNueva = form.imagen.trim();
+      if (imagenOriginal && imagenOriginal !== imagenNueva) {
+        await borrarImagenSiEsNuestra(imagenOriginal);
+      }
+      setImagenOriginal(imagenNueva);
 
       // Bitácora: edición y, si cambió, habilitar / deshabilitar
       await registrarActividad({
@@ -535,7 +546,14 @@ function EditarProductoForm() {
                   </div>
                 )}
               </div>
-              <label className={LABEL}>URL de la imagen</label>
+              <SubirImagen
+                carpeta="productos"
+                onSubida={(url) => {
+                  set('imagen', url);
+                  setImgFailed(false);
+                }}
+              />
+              <label className={`${LABEL} mt-4`}>O pega el enlace de una imagen</label>
               <input
                 className={FIELD}
                 value={form.imagen}
@@ -545,6 +563,18 @@ function EditarProductoForm() {
                 }}
                 placeholder="https://..."
               />
+              {form.imagen.trim() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    set('imagen', '');
+                    setImgFailed(false);
+                  }}
+                  className="mt-2 text-xs font-medium text-danger hover:underline"
+                >
+                  Quitar imagen
+                </button>
+              )}
             </div>
 
             <div className={`${CARD} p-6 space-y-5`}>

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { traerTodo } from '@/lib/paginar';
 import { etiquetaUsuario } from '@/lib/actividad';
 import SiPuede from '@/components/SiPuede';
 import { Product, Movimiento } from '@/types';
@@ -75,10 +76,9 @@ export default function EntradasPage() {
     const since = new Date(Date.now() - DAYS_BACK * 24 * 60 * 60 * 1000).toISOString();
 
     const [prodRes, entRes, provRes] = await Promise.all([
-      supabase
-        .from('productos')
-        .select('id, sku, nombre, stock, habilitado, proveedor_id')
-        .order('nombre'),
+      traerTodo((a, b) =>
+        supabase.from('productos').select('id, sku, nombre, stock, habilitado, proveedor_id').order('nombre').order('id').range(a, b)
+      ),
       supabase
         .from('movimientos')
         .select('id, producto_id, cantidad, motivo, usuario, proveedor, referencia, observaciones, created_at')

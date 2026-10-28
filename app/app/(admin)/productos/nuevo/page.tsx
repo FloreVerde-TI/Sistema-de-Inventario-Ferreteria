@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { etiquetaUsuario, registrarActividad } from '@/lib/actividad';
+import SubirImagen from '@/components/SubirImagen';
 import { Category } from '@/types';
 import { Save, X, Loader2, Package, Globe, CheckCircle2 } from 'lucide-react';
 
@@ -473,7 +474,14 @@ function NuevoProductoForm() {
                   </div>
                 )}
               </div>
-              <label className={LABEL}>URL de la imagen</label>
+              <SubirImagen
+                carpeta="productos"
+                onSubida={(url) => {
+                  set('imagen', url);
+                  setImgFailed(false);
+                }}
+              />
+              <label className={`${LABEL} mt-4`}>O pega el enlace de una imagen</label>
               <input
                 className={FIELD}
                 value={form.imagen}
@@ -483,6 +491,18 @@ function NuevoProductoForm() {
                 }}
                 placeholder="https://..."
               />
+              {form.imagen.trim() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    set('imagen', '');
+                    setImgFailed(false);
+                  }}
+                  className="mt-2 text-xs font-medium text-danger hover:underline"
+                >
+                  Quitar imagen
+                </button>
+              )}
             </div>
 
             <div className={`${CARD} p-6`}>

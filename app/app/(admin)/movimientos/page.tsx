@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { traerTodo } from '@/lib/paginar';
 import { Product, Movimiento } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
 import { Search, Download, ChevronDown, FileSpreadsheet, FileText, X, Loader2 } from 'lucide-react';
@@ -128,6 +129,16 @@ export default function MovimientosPage() {
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
+  // Al salir de la pantalla, filtros, búsqueda y página vuelven a empezar
+  useEffect(() => {
+    return () => {
+      setDraft(EMPTY_FILTERS);
+      setApplied(EMPTY_FILTERS);
+      setPage(1);
+      setNotice(null);
+    };
+  }, []);
+
   // Cierra el menú de exportar al hacer clic fuera de él
   useEffect(() => {
     if (!exportOpen) return;
@@ -141,10 +152,9 @@ export default function MovimientosPage() {
   // Nombres de productos (incluye inactivos, para mostrar movimientos antiguos)
   useEffect(() => {
     async function loadProducts() {
-      const { data, error: prodError } = await supabase
-        .from('productos')
-        .select('id, nombre')
-        .order('nombre');
+      const { data, error: prodError } = await traerTodo<ProductName>((a, b) =>
+        supabase.from('productos').select('id, nombre').order('nombre').order('id').range(a, b)
+      );
       if (prodError) {
         console.error('Error cargando productos:', prodError);
         setError(prodError.message);

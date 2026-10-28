@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { traerTodo } from '@/lib/paginar';
 import { etiquetaUsuario } from '@/lib/actividad';
 import { Product, Movimiento } from '@/types';
 import { Loader2, ArrowUpCircle, ScanLine } from 'lucide-react';
@@ -76,10 +77,9 @@ export default function SalidasPage() {
     const since = new Date(Date.now() - DAYS_BACK * 24 * 60 * 60 * 1000).toISOString();
 
     const [prodRes, salRes] = await Promise.all([
-      supabase
-        .from('productos')
-        .select('id, sku, nombre, stock, habilitado')
-        .order('nombre'),
+      traerTodo((a, b) =>
+        supabase.from('productos').select('id, sku, nombre, stock, habilitado').order('nombre').order('id').range(a, b)
+      ),
       supabase
         .from('movimientos')
         .select('id, producto_id, cantidad, motivo, usuario, referencia, observaciones, created_at')

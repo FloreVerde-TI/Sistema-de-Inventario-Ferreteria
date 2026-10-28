@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { traerTodo } from '@/lib/paginar';
 import { Product, Category, Movimiento } from '@/types';
 import { exportReport, formatMoney, type Column, type ExportSpec, type Format } from '@/lib/exportar';
 import {
@@ -24,6 +25,7 @@ type MovRow = Pick<
   'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'origen' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
 >;
 type PedidoRow = {
+  codigo: string | null;
   fecha: string | null;
   nombre_cliente: string | null;
   telefono: string | null;
@@ -57,7 +59,7 @@ const PRODUCT_FIELDS =
   'id, sku, codigo_barras, nombre, descripcion, precio, categoria_id, stock, stock_minimo, ubicacion, activo, habilitado, proveedor_id';
 const MOV_FIELDS = 'producto_id, tipo, cantidad, motivo, usuario, origen, proveedor, referencia, observaciones, created_at';
 const PED_FIELDS =
-  'fecha, nombre_cliente, telefono, metodo_pago, total, estado, revisado_nombre, revisado_en, motivo_rechazo, reabierto_nombre, reabierto_en';
+  'codigo, fecha, nombre_cliente, telefono, metodo_pago, total, estado, revisado_nombre, revisado_en, motivo_rechazo, reabierto_nombre, reabierto_en';
 const PAGE = 1000; // límite de filas por consulta en Supabase
 
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
@@ -169,6 +171,7 @@ const MOV_COLUMNS: Column<MovItem>[] = [
 
 const PED_COLUMNS: Column<PedidoRow>[] = [
   { key: 'fecha', label: 'Fecha', get: (p) => formatDateTime(p.fecha) },
+  { key: 'codigo', label: 'Código', get: (p) => (p.codigo ? `#${p.codigo}` : '') },
   { key: 'cliente', label: 'Cliente', get: (p) => p.nombre_cliente ?? '' },
   { key: 'telefono', label: 'Teléfono', get: (p) => p.telefono ?? '' },
   { key: 'pago', label: 'Pago', get: (p) => (p.metodo_pago && PAGO_LABEL[p.metodo_pago]) || '' },
@@ -193,7 +196,7 @@ async function loadProducts(f: ProdFilter): Promise<ProductItem[]> {
   const [catRes, provRes, prods] = await Promise.all([
     supabase.from('categorias').select('id, nombre'),
     supabase.from('proveedores').select('id, nombre'),
-    fetchAll<ProductRow>((a, b) => supabase.from('productos').select(PRODUCT_FIELDS).order('nombre').range(a, b)),
+    fetchAll<ProductRow>((a, b) => supabase.from('productos').select(PRODUCT_FIELDS).order('nombre').order('id').range(a, b)),
   ]);
   if (catRes.error) throw catRes.error;
   if (provRes.error) throw provRes.error;
@@ -218,7 +221,7 @@ async function loadProducts(f: ProdFilter): Promise<ProductItem[]> {
 async function loadMovements(f: MovFilter): Promise<MovItem[]> {
   checkRange(f.desde, f.hasta);
   const [prods, movs] = await Promise.all([
-    fetchAll<ProductName>((a, b) => supabase.from('productos').select('id, nombre').range(a, b)),
+    fetchAll<ProductName>((a, b) => supabase.from('productos').select('id, nombre').order('id').range(a, b)),
     fetchAll<MovRow>((a, b) => {
       let q = supabase.from('movimientos').select(MOV_FIELDS);
       if (f.tipo !== 'all') q = q.eq('tipo', f.tipo);
@@ -358,7 +361,7 @@ export default function ReportesPage() {
     async function loadLists() {
       const [catRes, prodRes, provRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
-        supabase.from('productos').select('id, nombre').order('nombre'),
+        traerTodo((a, b) => supabase.from('productos').select('id, nombre').order('nombre').order('id').range(a, b)),
         supabase.from('proveedores').select('id, nombre').order('nombre'),
       ]);
       if (cancelled) return;

@@ -4,6 +4,7 @@ import React, { Suspense, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import AdminLayout, { usePerfil, Permiso } from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { traerTodo } from '@/lib/paginar';
 import { Product } from '@/types';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -275,7 +276,9 @@ function DashboardContent() {
     async function loadSnapshot() {
       try {
         const [productsRes, categoriesRes] = await Promise.all([
-          supabase.from('productos').select('categoria_id, stock, stock_minimo, habilitado'),
+          traerTodo((a, b) =>
+            supabase.from('productos').select('categoria_id, stock, stock_minimo, habilitado').order('id').range(a, b)
+          ),
           supabase.from('categorias').select('id, nombre'),
         ]);
         const failed = productsRes.error ?? categoriesRes.error;

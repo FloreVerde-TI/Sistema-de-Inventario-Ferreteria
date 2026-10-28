@@ -10,7 +10,7 @@ import { Search, Download, ChevronDown, FileSpreadsheet, FileText, X, Loader2 } 
 type ProductName = Pick<Product, 'id' | 'nombre'>;
 type MovimientoRow = Pick<
   Movimiento,
-  'id' | 'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'origen' | 'proveedor' | 'referencia' | 'created_at'
+  'id' | 'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'origen' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
 >;
 type TipoFilter = 'all' | 'entrada' | 'salida';
 
@@ -25,7 +25,7 @@ type Filters = {
 const EMPTY_FILTERS: Filters = { search: '', desde: '', hasta: '', tipo: 'all', producto: 'all' };
 const PAGE_SIZE = 20;
 const EXPORT_PAGE = 1000; // límite de filas por consulta en Supabase
-const FIELDS = 'id, producto_id, tipo, cantidad, motivo, usuario, origen, proveedor, referencia, created_at';
+const FIELDS = 'id, producto_id, tipo, cantidad, motivo, usuario, origen, proveedor, referencia, observaciones, created_at';
 
 // Tarjeta blanca que se mantiene clara en modo oscuro (ver .card-light en globals.css)
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
@@ -66,6 +66,7 @@ function movQuery(f: Filters, products: ProductName[], count: boolean) {
       `motivo.ilike.%${term}%`,
       `proveedor.ilike.%${term}%`,
       `referencia.ilike.%${term}%`,
+      `observaciones.ilike.%${term}%`,
     ];
     if (ids.length > 0) parts.push(`producto_id.in.(${ids.join(',')})`);
     query = query.or(parts.join(','));
@@ -95,6 +96,7 @@ const EXPORT_COLUMNS: Column<ExportRow>[] = [
   { key: 'tipo', label: 'Tipo', get: (m) => (m.tipo === 'entrada' ? 'Entrada' : 'Salida') },
   { key: 'cantidad', label: 'Cantidad', get: (m) => m.cantidad, right: true },
   { key: 'motivo', label: 'Motivo', get: (m) => m.motivo ?? '', maxChars: 80 },
+  { key: 'observaciones', label: 'Observaciones', get: (m) => m.observaciones ?? '', maxChars: 80 },
   { key: 'proveedor', label: 'Proveedor', get: (m) => m.proveedor ?? '' },
   { key: 'referencia', label: 'Doc. referencia', get: (m) => m.referencia ?? '' },
   { key: 'usuario', label: 'Usuario', get: (m) => m.usuario ?? '' },
@@ -303,7 +305,7 @@ export default function MovimientosPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" size={18} />
             <input
               type="text"
-              placeholder="Buscar por producto, usuario, proveedor o motivo…"
+              placeholder="Buscar por producto, usuario, proveedor, motivo u observación…"
               className={`${FIELD} w-full pl-10 pr-4`}
               value={draft.search}
               onChange={(e) => setDraftField('search', e.target.value)}
@@ -407,6 +409,14 @@ export default function MovimientosPage() {
                               {[m.proveedor && `Proveedor: ${m.proveedor}`, m.referencia && `Doc: ${m.referencia}`]
                                 .filter(Boolean)
                                 .join(' · ')}
+                            </div>
+                          )}
+                          {m.observaciones && (
+                            <div
+                              title={m.observaciones}
+                              className="text-xs text-text-muted mt-0.5 italic max-w-sm line-clamp-2 [overflow-wrap:anywhere]"
+                            >
+                              {m.observaciones}
                             </div>
                           )}
                         </td>

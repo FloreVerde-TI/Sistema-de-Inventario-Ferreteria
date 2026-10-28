@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Html5Qrcode } from 'html5-qrcode';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import SiPuede from '@/components/SiPuede';
 import { Product, Category } from '@/types';
 import { ScanLine, Search, Package, ArrowDownCircle, ArrowUpCircle, X, Loader2, Plus } from 'lucide-react';
 
@@ -349,23 +350,38 @@ export default function BarcodePage() {
               <p className="text-sm font-semibold text-text break-words">
                 No se encontró ningún producto con el código «{notFound}».
               </p>
-              <p className="text-sm text-text-muted mt-1">¿Registrar como nuevo producto?</p>
+              <SiPuede permiso="productos_crear">
+                <p className="text-sm text-text-muted mt-1">¿Registrar como nuevo producto?</p>
+              </SiPuede>
             </div>
             <div className="flex gap-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => setNotFound(null)}
-                className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors"
+              <SiPuede
+                permiso="productos_crear"
+                sino={
+                  <button
+                    type="button"
+                    onClick={() => setNotFound(null)}
+                    className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors"
+                  >
+                    Cerrar
+                  </button>
+                }
               >
-                Ahora no
-              </button>
-              <button
-                type="button"
-                onClick={() => router.push(`/productos/nuevo?codigo=${encodeURIComponent(notFound)}`)}
-                className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center gap-2"
-              >
-                <Plus size={16} /> Registrar como nuevo producto
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setNotFound(null)}
+                  className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors"
+                >
+                  Ahora no
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push(`/productos/nuevo?codigo=${encodeURIComponent(notFound)}`)}
+                  className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center gap-2"
+                >
+                  <Plus size={16} /> Registrar como nuevo producto
+                </button>
+              </SiPuede>
             </div>
           </div>
         )}
@@ -430,6 +446,7 @@ export default function BarcodePage() {
               </div>
 
               <div className="flex gap-3 mt-6">
+                <SiPuede permiso="entradas">
                 <button
                   onClick={() => router.push(`/entradas?producto=${product.id}&desde=barcode`)}
                   disabled={product.habilitado === false}
@@ -437,6 +454,8 @@ export default function BarcodePage() {
                 >
                   <ArrowDownCircle size={16} /> Registrar entrada
                 </button>
+                </SiPuede>
+                <SiPuede permiso="salidas">
                 <button
                   onClick={() => router.push(`/salidas?producto=${product.id}&desde=barcode`)}
                   disabled={product.habilitado === false}
@@ -444,6 +463,7 @@ export default function BarcodePage() {
                 >
                   <ArrowUpCircle size={16} /> Registrar salida
                 </button>
+                </SiPuede>
               </div>
               {product.habilitado === false && (
                 <p className="text-xs text-text-muted mt-3">

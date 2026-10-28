@@ -2,7 +2,7 @@
 
 import React, { Suspense, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import AdminLayout from '@/components/AdminLayout';
+import AdminLayout, { usePerfil, Permiso } from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { Product } from '@/types';
 import {
@@ -550,15 +550,26 @@ function DashboardContent() {
 
 /* ---------- Componentes pequeños ---------- */
 
-const MENU_ITEMS = [
-  { href: '/entradas', label: 'Entrada', desc: 'Registrar ingreso de stock', icon: ArrowDownCircle, color: 'text-success' },
-  { href: '/salidas', label: 'Salida', desc: 'Registrar venta, daño o ajuste', icon: ArrowUpCircle, color: 'text-warning' },
+const MENU_ITEMS: {
+  href: string;
+  label: string;
+  desc: string;
+  icon: typeof ArrowDownCircle;
+  color: string;
+  permiso?: Permiso;
+}[] = [
+  { href: '/entradas', label: 'Entrada', desc: 'Registrar ingreso de stock', icon: ArrowDownCircle, color: 'text-success', permiso: 'entradas' },
+  { href: '/salidas', label: 'Salida', desc: 'Registrar venta, daño o ajuste', icon: ArrowUpCircle, color: 'text-warning', permiso: 'salidas' },
   { href: '/barcode', label: 'Código de barras', desc: 'Buscar o registrar por código', icon: ScanLine, color: 'text-primary-ink' },
 ];
 
 function NuevoMovimientoMenu() {
+  const { puede } = usePerfil();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Solo las opciones que el rol puede usar
+  const items = MENU_ITEMS.filter((i) => !i.permiso || puede(i.permiso));
+  const puedeMover = puede('entradas') || puede('salidas');
 
   useEffect(() => {
     if (!open) return;
@@ -576,6 +587,9 @@ function NuevoMovimientoMenu() {
     };
   }, [open]);
 
+  // Sin entradas ni salidas, el botón no tiene sentido
+  if (!puedeMover) return null;
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -588,7 +602,7 @@ function NuevoMovimientoMenu() {
       </button>
       {open && (
         <div className={`absolute right-0 mt-2 w-64 z-20 p-1.5 ${CARD} shadow-lg`}>
-          {MENU_ITEMS.map((item) => (
+          {items.map((item) => (
             <Link
               key={item.href}
               href={item.href}

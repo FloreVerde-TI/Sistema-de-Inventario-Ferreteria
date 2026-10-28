@@ -11,16 +11,17 @@ import {
 } from 'lucide-react';
 
 /* ---------- Tipos ---------- */
-type ProductRow = Pick<
+type ProductRow = { proveedor_id: string | null } & Pick<
   Product,
   | 'id' | 'sku' | 'codigo_barras' | 'nombre' | 'descripcion' | 'precio' | 'categoria_id'
   | 'stock' | 'stock_minimo' | 'ubicacion' | 'activo' | 'habilitado'
 >;
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
+type ProveedorRow = { id: string; nombre: string };
 type ProductName = Pick<Product, 'id' | 'nombre'>;
 type MovRow = Pick<
   Movimiento,
-  'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'origen' | 'proveedor' | 'referencia' | 'created_at'
+  'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'origen' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
 >;
 type PedidoRow = {
   fecha: string | null;
@@ -36,24 +37,25 @@ type PedidoRow = {
   reabierto_en: string | null;
 };
 
-type ProductItem = ProductRow & { categoria: string };
+type ProductItem = ProductRow & { categoria: string; proveedor: string };
 type MovItem = MovRow & { producto: string };
 
 type Source = 'productos' | 'movimientos' | 'pedidos';
 
-type ProdFilter = { categoria: string; deshabilitados: boolean };
+// proveedor: 'all' (todos), 'none' (sin proveedor) o el id del proveedor
+type ProdFilter = { categoria: string; proveedor: string; deshabilitados: boolean };
 type MovFilter = { desde: string; hasta: string; tipo: 'all' | 'entrada' | 'salida'; producto: string };
 type EstadoFilter = 'all' | 'Pendiente' | 'Aprobado' | 'Rechazado';
 type PagoFilter = 'all' | 'sinpe' | 'transferencia' | 'whatsapp';
 type PedFilter = { desde: string; hasta: string; estado: EstadoFilter; pago: PagoFilter };
 
-const EMPTY_PROD: ProdFilter = { categoria: 'all', deshabilitados: false };
+const EMPTY_PROD: ProdFilter = { categoria: 'all', proveedor: 'all', deshabilitados: false };
 const EMPTY_MOV: MovFilter = { desde: '', hasta: '', tipo: 'all', producto: 'all' };
 const EMPTY_PED: PedFilter = { desde: '', hasta: '', estado: 'all', pago: 'all' };
 
 const PRODUCT_FIELDS =
-  'id, sku, codigo_barras, nombre, descripcion, precio, categoria_id, stock, stock_minimo, ubicacion, activo, habilitado';
-const MOV_FIELDS = 'producto_id, tipo, cantidad, motivo, usuario, origen, proveedor, referencia, created_at';
+  'id, sku, codigo_barras, nombre, descripcion, precio, categoria_id, stock, stock_minimo, ubicacion, activo, habilitado, proveedor_id';
+const MOV_FIELDS = 'producto_id, tipo, cantidad, motivo, usuario, origen, proveedor, referencia, observaciones, created_at';
 const PED_FIELDS =
   'fecha, nombre_cliente, telefono, metodo_pago, total, estado, revisado_nombre, revisado_en, motivo_rechazo, reabierto_nombre, reabierto_en';
 const PAGE = 1000; // límite de filas por consulta en Supabase
@@ -129,6 +131,7 @@ const PRODUCT_COLUMNS: Column<ProductItem>[] = [
   { key: 'barras', label: 'Cód. barras', get: (p) => p.codigo_barras ?? '' },
   { key: 'nombre', label: 'Nombre', get: (p) => p.nombre },
   { key: 'categoria', label: 'Categoría', get: (p) => p.categoria },
+  { key: 'proveedor', label: 'Proveedor', get: (p) => p.proveedor },
   { key: 'precio', label: 'Precio', get: (p) => p.precio ?? 0, right: true, money: true },
   { key: 'stock', label: 'Stock', get: (p) => p.stock ?? 0, right: true },
   { key: 'minimo', label: 'Mínimo', get: (p) => p.stock_minimo ?? 0, right: true },
@@ -157,6 +160,7 @@ const MOV_COLUMNS: Column<MovItem>[] = [
   { key: 'tipo', label: 'Tipo', get: (m) => (m.tipo === 'entrada' ? 'Entrada' : 'Salida') },
   { key: 'cantidad', label: 'Cantidad', get: (m) => m.cantidad, right: true },
   { key: 'motivo', label: 'Motivo', get: (m) => m.motivo ?? '' },
+  { key: 'observaciones', label: 'Observaciones', get: (m) => m.observaciones ?? '', maxChars: 100 },
   { key: 'proveedor', label: 'Proveedor', get: (m) => m.proveedor ?? '' },
   { key: 'referencia', label: 'Doc. referencia', get: (m) => m.referencia ?? '' },
   { key: 'usuario', label: 'Usuario', get: (m) => m.usuario ?? '' },
@@ -186,15 +190,29 @@ const ALL_KEYS: Record<Source, string[]> = {
 /* ---------- Carga de datos ---------- */
 
 async function loadProducts(f: ProdFilter): Promise<ProductItem[]> {
-  const [catRes, prods] = await Promise.all([
+  const [catRes, provRes, prods] = await Promise.all([
     supabase.from('categorias').select('id, nombre'),
+    supabase.from('proveedores').select('id, nombre'),
     fetchAll<ProductRow>((a, b) => supabase.from('productos').select(PRODUCT_FIELDS).order('nombre').range(a, b)),
   ]);
   if (catRes.error) throw catRes.error;
+  if (provRes.error) throw provRes.error;
   const names = new Map(((catRes.data ?? []) as CategoryRow[]).map((c) => [c.id, c.nombre]));
+  const provNames = new Map(((provRes.data ?? []) as ProveedorRow[]).map((p) => [p.id, p.nombre]));
+  const matchesProv = (p: ProductRow) =>
+    f.proveedor === 'all' || (f.proveedor === 'none' ? !p.proveedor_id : p.proveedor_id === f.proveedor);
   return prods
-    .filter((p) => (f.deshabilitados || p.habilitado !== false) && (f.categoria === 'all' || p.categoria_id === f.categoria))
-    .map((p) => ({ ...p, categoria: (p.categoria_id && names.get(p.categoria_id)) || 'Sin categoría' }));
+    .filter(
+      (p) =>
+        (f.deshabilitados || p.habilitado !== false) &&
+        (f.categoria === 'all' || p.categoria_id === f.categoria) &&
+        matchesProv(p)
+    )
+    .map((p) => ({
+      ...p,
+      categoria: (p.categoria_id && names.get(p.categoria_id)) || 'Sin categoría',
+      proveedor: (p.proveedor_id && provNames.get(p.proveedor_id)) || '',
+    }));
 }
 
 async function loadMovements(f: MovFilter): Promise<MovItem[]> {
@@ -234,6 +252,17 @@ function categoryText(f: ProdFilter, categories: CategoryRow[]): string {
   return categories.find((c) => c.id === f.categoria)?.nombre ?? 'Categoría';
 }
 
+function proveedorText(f: ProdFilter, proveedores: ProveedorRow[]): string {
+  if (f.proveedor === 'all') return 'Todos los proveedores';
+  if (f.proveedor === 'none') return 'Sin proveedor';
+  return `Proveedor: ${proveedores.find((p) => p.id === f.proveedor)?.nombre ?? '—'}`;
+}
+
+// Líneas de resumen de filtros de productos
+function prodFilterText(f: ProdFilter, categories: CategoryRow[], proveedores: ProveedorRow[]): string[] {
+  return [categoryText(f, categories), proveedorText(f, proveedores)];
+}
+
 function movSummary(rows: MovItem[], f: MovFilter): string[] {
   const units = (t: string) => rows.filter((m) => m.tipo === t).reduce((s, m) => s + m.cantidad, 0);
   return [
@@ -256,39 +285,39 @@ function pedSummary(rows: PedidoRow[], f: PedFilter): string[] {
   ];
 }
 
-async function buildInventario(f: ProdFilter, categories: CategoryRow[]): Promise<ExportSpec<ProductItem>> {
+async function buildInventario(f: ProdFilter, categories: CategoryRow[], proveedores: ProveedorRow[]): Promise<ExportSpec<ProductItem>> {
   const rows = await loadProducts(f);
   const units = rows.reduce((s, p) => s + Math.max(p.stock ?? 0, 0), 0);
   const value = rows.reduce((s, p) => s + (p.precio ?? 0) * Math.max(p.stock ?? 0, 0), 0);
   return {
     title: 'Inventario completo',
     file: 'inventario_completo',
-    columns: pick(PRODUCT_COLUMNS, ['sku', 'barras', 'nombre', 'categoria', 'precio', 'stock', 'minimo', 'valor', 'ubicacion', 'estado', 'web']),
+    columns: pick(PRODUCT_COLUMNS, ['sku', 'barras', 'nombre', 'categoria', 'proveedor', 'precio', 'stock', 'minimo', 'valor', 'ubicacion', 'estado', 'web']),
     rows,
-    summary: [categoryText(f, categories), `Productos: ${rows.length}`, `Unidades: ${units}`, `Valor total: ${formatMoney(value)}`],
+    summary: [...prodFilterText(f, categories, proveedores), `Productos: ${rows.length}`, `Unidades: ${units}`, `Valor total: ${formatMoney(value)}`],
     totals: { nombre: 'TOTAL', stock: units, valor: value },
   };
 }
 
-async function buildStockBajo(f: ProdFilter, categories: CategoryRow[]): Promise<ExportSpec<ProductItem>> {
+async function buildStockBajo(f: ProdFilter, categories: CategoryRow[], proveedores: ProveedorRow[]): Promise<ExportSpec<ProductItem>> {
   const rows = (await loadProducts({ ...f, deshabilitados: false })).filter((p) => stockStatus(p) === 'Stock bajo');
   return {
     title: 'Productos con stock bajo',
     file: 'stock_bajo',
-    columns: pick(PRODUCT_COLUMNS, ['sku', 'nombre', 'categoria', 'stock', 'minimo', 'reponer', 'ubicacion']),
+    columns: pick(PRODUCT_COLUMNS, ['sku', 'nombre', 'categoria', 'proveedor', 'stock', 'minimo', 'reponer', 'ubicacion']),
     rows,
-    summary: [categoryText(f, categories), `Productos: ${rows.length}`],
+    summary: [...prodFilterText(f, categories, proveedores), `Productos: ${rows.length}`],
   };
 }
 
-async function buildAgotados(f: ProdFilter, categories: CategoryRow[]): Promise<ExportSpec<ProductItem>> {
+async function buildAgotados(f: ProdFilter, categories: CategoryRow[], proveedores: ProveedorRow[]): Promise<ExportSpec<ProductItem>> {
   const rows = (await loadProducts({ ...f, deshabilitados: false })).filter((p) => stockStatus(p) === 'Agotado');
   return {
     title: 'Productos agotados',
     file: 'agotados',
-    columns: pick(PRODUCT_COLUMNS, ['sku', 'barras', 'nombre', 'categoria', 'stock', 'minimo', 'ubicacion']),
+    columns: pick(PRODUCT_COLUMNS, ['sku', 'barras', 'nombre', 'categoria', 'proveedor', 'stock', 'minimo', 'ubicacion']),
     rows,
-    summary: [categoryText(f, categories), `Productos: ${rows.length}`],
+    summary: [...prodFilterText(f, categories, proveedores), `Productos: ${rows.length}`],
   };
 }
 
@@ -306,6 +335,7 @@ async function buildPedidos(f: PedFilter): Promise<ExportSpec<PedidoRow>> {
 
 export default function ReportesPage() {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [proveedores, setProveedores] = useState<ProveedorRow[]>([]);
   const [productNames, setProductNames] = useState<ProductName[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -326,12 +356,14 @@ export default function ReportesPage() {
   useEffect(() => {
     let cancelled = false;
     async function loadLists() {
-      const [catRes, prodRes] = await Promise.all([
+      const [catRes, prodRes, provRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
         supabase.from('productos').select('id, nombre').order('nombre'),
+        supabase.from('proveedores').select('id, nombre').order('nombre'),
       ]);
       if (cancelled) return;
-      const failed = catRes.error ?? prodRes.error;
+      const failed = catRes.error ?? prodRes.error ?? provRes.error;
+      setProveedores((provRes.data ?? []) as ProveedorRow[]);
       if (failed) setError(`No se pudieron cargar los filtros: ${failed.message}`);
       setCategories((catRes.data ?? []) as CategoryRow[]);
       setProductNames((prodRes.data ?? []) as ProductName[]);
@@ -369,7 +401,7 @@ export default function ReportesPage() {
     if (source === 'productos') {
       return run(format, async () => {
         const rows = await loadProducts(cProdF);
-        return { ...base, columns: pick(PRODUCT_COLUMNS, keys), rows, summary: [categoryText(cProdF, categories), `Productos: ${rows.length}`] };
+        return { ...base, columns: pick(PRODUCT_COLUMNS, keys), rows, summary: [...prodFilterText(cProdF, categories, proveedores), `Productos: ${rows.length}`] };
       });
     }
     if (source === 'movimientos') {
@@ -422,9 +454,9 @@ export default function ReportesPage() {
             color="blue"
             title="Inventario completo"
             desc="Todos los productos con precio, stock, ubicación y valor total del inventario."
-            onExport={(fmt) => run(fmt, () => buildInventario(invF, categories))}
+            onExport={(fmt) => run(fmt, () => buildInventario(invF, categories, proveedores))}
           >
-            <ProductFilters value={invF} onChange={setInvF} categories={categories} showDisabled />
+            <ProductFilters value={invF} onChange={setInvF} categories={categories} proveedores={proveedores} showDisabled />
           </ReportCard>
 
           <ReportCard
@@ -432,9 +464,9 @@ export default function ReportesPage() {
             color="amber"
             title="Stock bajo"
             desc="Artículos en o por debajo del mínimo, con la cantidad por reponer."
-            onExport={(fmt) => run(fmt, () => buildStockBajo(lowF, categories))}
+            onExport={(fmt) => run(fmt, () => buildStockBajo(lowF, categories, proveedores))}
           >
-            <ProductFilters value={lowF} onChange={setLowF} categories={categories} />
+            <ProductFilters value={lowF} onChange={setLowF} categories={categories} proveedores={proveedores} />
           </ReportCard>
 
           <ReportCard
@@ -442,9 +474,9 @@ export default function ReportesPage() {
             color="red"
             title="Agotados"
             desc="Artículos sin existencias disponibles para la venta."
-            onExport={(fmt) => run(fmt, () => buildAgotados(outF, categories))}
+            onExport={(fmt) => run(fmt, () => buildAgotados(outF, categories, proveedores))}
           >
-            <ProductFilters value={outF} onChange={setOutF} categories={categories} />
+            <ProductFilters value={outF} onChange={setOutF} categories={categories} proveedores={proveedores} />
           </ReportCard>
 
           <ReportCard
@@ -489,7 +521,7 @@ export default function ReportesPage() {
                 </select>
               </div>
               {source === 'productos' && (
-                <ProductFilters value={cProdF} onChange={setCProdF} categories={categories} showDisabled />
+                <ProductFilters value={cProdF} onChange={setCProdF} categories={categories} proveedores={proveedores} showDisabled />
               )}
               {source === 'movimientos' && <MovFilters value={cMovF} onChange={setCMovF} products={productNames} />}
               {source === 'pedidos' && <PedFilters value={cPedF} onChange={setCPedF} />}
@@ -629,11 +661,13 @@ function ProductFilters({
   value,
   onChange,
   categories,
+  proveedores,
   showDisabled = false,
 }: {
   value: ProdFilter;
   onChange: (f: ProdFilter) => void;
   categories: CategoryRow[];
+  proveedores: ProveedorRow[];
   showDisabled?: boolean;
 }) {
   return (
@@ -645,6 +679,18 @@ function ProductFilters({
           {categories.map((c) => (
             <option key={c.id} value={c.id}>
               {c.nombre}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className={LABEL}>Proveedor</label>
+        <select className={FIELD} value={value.proveedor} onChange={(e) => onChange({ ...value, proveedor: e.target.value })}>
+          <option value="all">Todos los proveedores</option>
+          <option value="none">Sin proveedor</option>
+          {proveedores.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.nombre}
             </option>
           ))}
         </select>

@@ -4,13 +4,14 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
+import { etiquetaUsuario } from '@/lib/actividad';
 import { Product, Movimiento } from '@/types';
 import { Loader2, ArrowUpCircle, ScanLine } from 'lucide-react';
 
 type ProductOption = Pick<Product, 'id' | 'sku' | 'nombre' | 'stock' | 'habilitado'>;
 type SalidaRow = Pick<
   Movimiento,
-  'id' | 'producto_id' | 'cantidad' | 'motivo' | 'usuario' | 'referencia' | 'created_at'
+  'id' | 'producto_id' | 'cantidad' | 'motivo' | 'usuario' | 'referencia' | 'observaciones' | 'created_at'
 >;
 
 type FormState = {
@@ -18,6 +19,7 @@ type FormState = {
   cantidad: string;
   motivo: string;
   referencia: string;
+  observaciones: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -25,6 +27,7 @@ const EMPTY_FORM: FormState = {
   cantidad: '',
   motivo: '',
   referencia: '',
+  observaciones: '',
 };
 
 const MOTIVOS = [
@@ -45,6 +48,7 @@ const TH = 'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-so
 const TD = 'px-4 py-3';
 
 const DAYS_BACK = 30;
+const MAX_OBS = 150; // máximo de caracteres de Observaciones
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('es-CR', {
@@ -78,7 +82,7 @@ export default function SalidasPage() {
         .order('nombre'),
       supabase
         .from('movimientos')
-        .select('id, producto_id, cantidad, motivo, usuario, referencia, created_at')
+        .select('id, producto_id, cantidad, motivo, usuario, referencia, observaciones, created_at')
         .eq('tipo', 'salida')
         .gte('created_at', since)
         .order('created_at', { ascending: false })
@@ -148,19 +152,8 @@ export default function SalidasPage() {
 
     setSaving(true);
 
-    // Nombre del usuario que registra la salida
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    let usuario = user?.email ?? 'Desconocido';
-    if (user) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', user.id)
-        .maybeSingle();
-      usuario = profile?.full_name ?? usuario;
-    }
+    // Quien registra la salida: "Nombre — Rol"
+    const usuario = await etiquetaUsuario();
 
     // cantidad siempre positiva: el trigger resta el stock cuando tipo no es 'entrada'
     const { error: insertError } = await supabase.from('movimientos').insert({
@@ -171,6 +164,7 @@ export default function SalidasPage() {
       referencia: form.referencia.trim() || null,
       usuario,
       origen: 'panel',
+      observaciones: form.observaciones.trim() || null,
     });
 
     if (insertError) {
@@ -280,6 +274,21 @@ export default function SalidasPage() {
                 onChange={(e) => setField('referencia', e.target.value)}
               />
             </div>
+
+            <div className="col-span-2 flex flex-col gap-1.5">
+              <label className={LABEL}>Observaciones (opcional)</label>
+              <textarea
+                rows={2}
+                maxLength={MAX_OBS}
+                placeholder="Ej. Llegó una caja golpeada, se revisó y está bien"
+                className={`${FIELD} resize-none`}
+                value={form.observaciones}
+                onChange={(e) => setField('observaciones', e.target.value)}
+              />
+              <span className="text-[11px] text-text-muted text-right">
+                {form.observaciones.length}/{MAX_OBS}
+              </span>
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 mt-6 pt-5 border-t border-border">
@@ -337,7 +346,17 @@ export default function SalidasPage() {
                         <td className={`${TD} font-medium text-text`}>
                           {productName.get(m.producto_id) ?? 'Producto no disponible'}
                         </td>
-                        <td className={`${TD} text-text-soft`}>{m.motivo || '—'}</td>
+                        <td className={`${TD} text-text-soft`}>
+                          {m.motivo || '—'}
+                          {m.observaciones && (
+                            <div
+                              title={m.observaciones}
+                              className="text-xs text-text-muted mt-0.5 italic max-w-xs line-clamp-2 [overflow-wrap:anywhere]"
+                            >
+                              {m.observaciones}
+                            </div>
+                          )}
+                        </td>
                         <td className={`${TD} text-right font-semibold text-danger`}>−{m.cantidad}</td>
                         <td className={`${TD} text-text-soft`}>{m.referencia || '—'}</td>
                         <td className={`${TD} text-text-soft`}>{m.usuario || '—'}</td>

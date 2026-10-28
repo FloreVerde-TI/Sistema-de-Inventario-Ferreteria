@@ -361,8 +361,13 @@ function BuscadorRapido() {
         inputRef.current?.focus();
       }
     }
+    // Clic fuera: se cierra y se limpia
     function onClick(e: MouseEvent) {
-      if (cajaRef.current && !cajaRef.current.contains(e.target as Node)) setAbierto(false);
+      if (cajaRef.current && !cajaRef.current.contains(e.target as Node)) {
+        setAbierto(false);
+        setTexto('');
+        setResultados([]);
+      }
     }
     window.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onClick);
@@ -399,8 +404,12 @@ function BuscadorRapido() {
     };
   }, [texto]);
 
+  // Al abrir un resultado, el buscador queda limpio
   function abrirEnProductos(valor: string) {
     setAbierto(false);
+    setTexto('');
+    setResultados([]);
+    inputRef.current?.blur();
     router.push(`/productos?buscar=${encodeURIComponent(valor)}`);
   }
 
@@ -418,6 +427,8 @@ function BuscadorRapido() {
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             setAbierto(false);
+            setTexto('');
+            setResultados([]);
             inputRef.current?.blur();
           }
           if (e.key === 'Enter' && texto.trim().length >= 2) {

@@ -115,8 +115,14 @@ function detectarTitulos(filas: unknown[][]): { fila: number; mapa: Map<number, 
     const mapa = new Map<number, Campo>();
     const usados = new Set<Campo>();
     (filas[i] ?? []).forEach((celda, col) => {
-      const t = normalizar(celda);
-      const def = CAMPOS.find((c) => !usados.has(c.campo) && c.alias.includes(t));
+      // Se prueba el título completo y sin lo que va entre paréntesis o el "*"
+      // (así "Código (SKU)" o "En web (Sí/No) *" también se reconocen)
+      const completo = normalizar(celda);
+      const sinExtras = normalizar(String(celda ?? '').replace(/\([^)]*\)/g, '').replace(/\*/g, ''));
+      const dentro = normalizar((String(celda ?? '').match(/\(([^)]*)\)/) ?? [])[1] ?? '');
+      const def = CAMPOS.find(
+        (c) => !usados.has(c.campo) && [completo, sinExtras, dentro].some((t) => t !== '' && c.alias.includes(t))
+      );
       if (def) {
         mapa.set(col, def.campo);
         usados.add(def.campo);

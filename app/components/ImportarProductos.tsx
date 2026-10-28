@@ -330,19 +330,26 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
       if (datosFilas.length > MAX_FILAS) throw new Error(`El archivo tiene más de ${MAX_FILAS} filas. Divídelo en partes.`);
 
       // Lo que ya existe en el sistema (para no duplicar)
-      const [prodRes, cfgRes, catRes, provRes] = await Promise.all([
+      const [prodRes, cfgRes, catRes, provRes, codRes] = await Promise.all([
         traerTodo<{ nombre: string; sku: string | null; codigo_barras: string | null }>((a, b) =>
           supabase.from('productos').select('nombre, sku, codigo_barras').order('id').range(a, b)
         ),
         supabase.from('settings').select('stock_minimo_defecto').eq('id', 1).maybeSingle(),
         supabase.from('categorias').select('nombre'),
         supabase.from('proveedores').select('nombre'),
+        // Códigos de barras adicionales (también cuentan como existentes)
+        traerTodo<{ codigo: string }>((a, b) =>
+          supabase.from('codigos_barras').select('codigo').order('id').range(a, b)
+        ),
       ]);
       if (prodRes.error) throw new Error(prodRes.error.message);
       const ex: Existentes = {
         nombres: new Set((prodRes.data ?? []).map((p) => p.nombre.trim().toLowerCase())),
         skus: new Set((prodRes.data ?? []).filter((p) => p.sku).map((p) => (p.sku as string).trim().toLowerCase())),
-        barras: new Set((prodRes.data ?? []).filter((p) => p.codigo_barras).map((p) => (p.codigo_barras as string).trim())),
+        barras: new Set([
+          ...(prodRes.data ?? []).filter((p) => p.codigo_barras).map((p) => (p.codigo_barras as string).trim()),
+          ...(codRes.data ?? []).map((c) => c.codigo.trim()),
+        ]),
         minimoDefecto: (cfgRes.data as { stock_minimo_defecto: number } | null)?.stock_minimo_defecto ?? 5,
       };
 

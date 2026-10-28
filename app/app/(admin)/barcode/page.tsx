@@ -130,11 +130,28 @@ export default function BarcodePage() {
     setProduct(null);
     setImgError(false);
 
-    const { data, error: queryError } = await supabase
+    let { data, error: queryError } = await supabase
       .from('productos')
       .select(PRODUCT_FIELDS)
       .or(`codigo_barras.eq.${value},sku.eq.${value}`)
       .limit(1);
+
+    // Si no es el código principal ni el SKU, se busca en los códigos adicionales
+    if (!queryError && (!data || data.length === 0)) {
+      const { data: extra, error: extraErr } = await supabase
+        .from('codigos_barras')
+        .select('producto_id')
+        .eq('codigo', value)
+        .limit(1);
+      if (extraErr) queryError = extraErr;
+      else if (extra && extra.length > 0) {
+        ({ data, error: queryError } = await supabase
+          .from('productos')
+          .select(PRODUCT_FIELDS)
+          .eq('id', extra[0].producto_id)
+          .limit(1));
+      }
+    }
 
     if (queryError) {
       console.error('Error buscando producto:', queryError);

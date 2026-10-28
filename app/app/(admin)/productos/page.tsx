@@ -177,6 +177,8 @@ function ProductosContenido() {
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [proveedores, setProveedores] = useState<ProveedorRow[]>([]);
+  // Códigos de barras adicionales por producto (producto_id → códigos)
+  const [codigosExtra, setCodigosExtra] = useState<Map<string, string[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -223,7 +225,7 @@ function ProductosContenido() {
 
   useEffect(() => {
     async function fetchData() {
-      const [catRes, prodRes, provRes] = await Promise.all([
+      const [catRes, prodRes, provRes, codRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
         traerTodo((a, b) =>
           supabase
@@ -236,6 +238,9 @@ function ProductosContenido() {
             .range(a, b)
         ),
         supabase.from('proveedores').select('id, nombre').order('nombre'),
+        traerTodo<{ producto_id: string; codigo: string }>((a, b) =>
+          supabase.from('codigos_barras').select('producto_id, codigo').order('id').range(a, b)
+        ),
       ]);
 
       const failed = catRes.error ?? prodRes.error;
@@ -246,6 +251,9 @@ function ProductosContenido() {
         setCategories((catRes.data ?? []) as CategoryRow[]);
         setProducts((prodRes.data ?? []) as unknown as ProductRow[]);
         setProveedores((provRes.data ?? []) as ProveedorRow[]);
+        const mapa = new Map<string, string[]>();
+        for (const c of codRes.data ?? []) mapa.set(c.producto_id, [...(mapa.get(c.producto_id) ?? []), c.codigo]);
+        setCodigosExtra(mapa);
       }
       setLoading(false);
     }
@@ -259,7 +267,10 @@ function ProductosContenido() {
     const term = searchTerm.trim().toLowerCase();
     return products.filter((p) => {
       const matchesSearch =
-        !term || [p.nombre, p.sku, p.codigo_barras].some((v) => v?.toLowerCase().includes(term));
+        !term ||
+        [p.nombre, p.sku, p.codigo_barras, ...(codigosExtra.get(String(p.id)) ?? [])].some((v) =>
+          v?.toLowerCase().includes(term)
+        );
       const matchesCategory = filterCategory === 'all' || p.categoria_id === filterCategory;
       const matchesStatus =
         filterStatus === 'all' || getStatus(p.stock, p.stock_minimo) === filterStatus;
@@ -269,7 +280,7 @@ function ProductosContenido() {
       const matchesHabilitado = p.habilitado !== false || verDeshabilitados || !!term;
       return matchesSearch && matchesCategory && matchesStatus && matchesWeb && matchesHabilitado;
     });
-  }, [products, searchTerm, filterCategory, filterStatus, filterWeb, verDeshabilitados]);
+  }, [products, codigosExtra, searchTerm, filterCategory, filterStatus, filterWeb, verDeshabilitados]);
   const totalDeshabilitados = useMemo(() => products.filter((p) => p.habilitado === false).length, [products]);
 
   async function handleExport(format: Format) {
@@ -550,6 +561,7 @@ function ProductosContenido() {
           product={selected}
           categoria={(selected.categoria_id && categoryName.get(selected.categoria_id)) || 'Sin categoría'}
           proveedor={(selected.proveedor_id && proveedorName.get(selected.proveedor_id)) || '—'}
+          codigosExtra={codigosExtra.get(String(selected.id)) ?? []}
           onClose={() => setSelected(null)}
         />
       )}
@@ -620,11 +632,13 @@ function ProductDetailModal({
   product,
   categoria,
   proveedor,
+  codigosExtra,
   onClose,
 }: {
   product: ProductRow;
   categoria: string;
   proveedor: string;
+  codigosExtra: string[];
   onClose: () => void;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
@@ -692,6 +706,11 @@ function ProductDetailModal({
             <DetailItem label="Precio" value={formatPrice(product.precio)} />
             <DetailItem label="Código (SKU)" value={product.sku || '—'} />
             <DetailItem label="Código de barras" value={product.codigo_barras || '—'} />
+            {codigosExtra.length > 0 && (
+              <div className="col-span-2">
+                <DetailItem label="Códigos adicionales" value={codigosExtra.join(', ')} />
+              </div>
+            )}
             <DetailItem label="Stock actual" value={product.stock ?? 0} />
             <DetailItem label="Stock mínimo" value={product.stock_minimo ?? 0} />
             <DetailItem label="Proveedor" value={proveedor} />

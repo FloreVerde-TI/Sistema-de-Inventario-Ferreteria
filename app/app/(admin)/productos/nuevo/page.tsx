@@ -23,6 +23,7 @@ interface FormState {
   precio: string;
   sku: string;
   codigo_barras: string;
+  codigosExtra: string; // adicionales, separados por coma
   stock: string;
   stock_minimo: string;
   ubicacion: string;
@@ -43,6 +44,7 @@ const EMPTY_FORM: FormState = {
   precio: '',
   sku: '',
   codigo_barras: '',
+  codigosExtra: '',
   stock: '0',
   stock_minimo: '5',
   ubicacion: '',
@@ -56,9 +58,9 @@ const FIELD =
 const LABEL = 'block text-xs font-semibold uppercase tracking-wide text-text-soft mb-1';
 
 function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
+  if (err instanceof Error) return err.message.replace('CODIGO_DUPLICADO: ', '');
   if (typeof err === 'object' && err !== null && 'message' in err) {
-    return String((err as { message: unknown }).message);
+    return String((err as { message: unknown }).message).replace('CODIGO_DUPLICADO: ', '');
   }
   return 'Error desconocido';
 }
@@ -128,6 +130,10 @@ function NuevoProductoForm() {
     const minimo = Number(form.stock_minimo);
     const nuevaCat = form.nuevaCategoria.trim();
     const barras = form.codigo_barras.trim();
+    // Códigos adicionales: separados por coma o salto de línea, sin repetidos
+    const extras = Array.from(
+      new Set(form.codigosExtra.split(/[,\n]/).map((c) => c.trim()).filter(Boolean))
+    ).filter((c) => c !== barras);
 
     if (!nombre) return setError('Escribe el nombre del producto.');
     if (!form.categoria) return setError('Elige una categoría.');
@@ -142,16 +148,23 @@ function NuevoProductoForm() {
 
     setSaving(true);
     try {
-      // 1. Código de barras repetido
-      if (barras) {
-        const { data: dup, error: dupErr } = await supabase
-          .from('productos')
-          .select('id, nombre')
-          .eq('codigo_barras', barras)
-          .limit(1);
+      // 1. Códigos de barras repetidos (principal y adicionales, contra ambas tablas)
+      const todos = barras ? [barras, ...extras] : extras;
+      if (todos.length > 0) {
+        const [{ data: dup, error: dupErr }, { data: dupAd, error: dupAdErr }] = await Promise.all([
+          supabase.from('productos').select('nombre, codigo_barras').in('codigo_barras', todos).limit(1),
+          supabase.from('codigos_barras').select('codigo, productos(nombre)').in('codigo', todos).limit(1),
+        ]);
         if (dupErr) throw dupErr;
+        if (dupAdErr) throw dupAdErr;
         if (dup && dup.length > 0) {
-          setError(`Ese código de barras ya pertenece a "${dup[0].nombre}".`);
+          setError(`El código ${dup[0].codigo_barras} ya pertenece a "${dup[0].nombre}".`);
+          return;
+        }
+        if (dupAd && dupAd.length > 0) {
+          const fila = dupAd[0] as { codigo: string; productos: { nombre: string } | { nombre: string }[] | null };
+          const dueño = Array.isArray(fila.productos) ? fila.productos[0]?.nombre : fila.productos?.nombre;
+          setError(`El código ${fila.codigo} ya pertenece a "${dueño ?? 'otro producto'}".`);
           return;
         }
       }
@@ -217,12 +230,25 @@ function NuevoProductoForm() {
       if (prodErr) throw prodErr;
       const productoId = (prod as { id: string }).id;
 
+      // 3b. Códigos adicionales
+      if (extras.length > 0) {
+        const { error: codErr } = await supabase
+          .from('codigos_barras')
+          .insert(extras.map((codigo) => ({ producto_id: productoId, codigo })));
+        if (codErr) {
+          setError(`El producto se creó, pero no se guardaron los códigos adicionales: ${errorMessage(codErr)}. Agrégalos desde Editar.`);
+          return;
+        }
+      }
+
       // Bitácora
       await registrarActividad({
         accion: 'crear',
         entidad: 'producto',
         entidad_id: productoId,
-        detalle: `Creó el producto "${nombre}"${stock > 0 ? ` con stock inicial ${stock}` : ''}`,
+        detalle: `Creó el producto "${nombre}"${stock > 0 ? ` con stock inicial ${stock}` : ''}${
+          extras.length > 0 ? ` y ${extras.length} código(s) de barras adicional(es)` : ''
+        }`,
       });
 
       // 4. Stock inicial como entrada (el trigger suma el stock)
@@ -383,7 +409,25 @@ function NuevoProductoForm() {
                     className={FIELD}
                     value={form.codigo_barras}
                     onChange={(e) => set('codigo_barras', e.target.value)}
-                    placeholder="Opcional"
+                    placeholder="Opcional (código principal)"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className={LABEL}>Códigos de barras adicionales</label>
+                  <input
+                    className={FIELD}
+                    value={form.codigosExtra}
+                    onChange={(e) => set('codigosExtra', e.target.value)}
+                    onKeyDown={(e) => {
+                      // El lector de códigos manda Enter: lo convertimos en coma para no guardar el formulario
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (form.codigosExtra.trim() && !form.codigosExtra.trim().endsWith(','))
+                          set('codigosExtra', form.codigosExtra.trim() + ', ');
+                      }
+                    }}
+                    placeholder="Opcional. Varios separados por coma (ej: 7441234567890, 7449876543210)"
                   />
                 </div>
 

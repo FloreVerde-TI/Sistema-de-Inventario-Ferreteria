@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { registrarActividad } from '@/lib/actividad';
 import SiPuede from '@/components/SiPuede';
 import SubirImagen from '@/components/SubirImagen';
+import CodigosAdicionales from '@/components/CodigosAdicionales';
 import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import { Product, Category } from '@/types';
 import { Save, X, Loader2, Package, Globe, CheckCircle2, Power } from 'lucide-react';
@@ -60,9 +61,9 @@ const FIELD =
 const LABEL = 'block text-xs font-semibold uppercase tracking-wide text-text-soft mb-1';
 
 function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
+  if (err instanceof Error) return err.message.replace('CODIGO_DUPLICADO: ', '');
   if (typeof err === 'object' && err !== null && 'message' in err) {
-    return String((err as { message: unknown }).message);
+    return String((err as { message: unknown }).message).replace('CODIGO_DUPLICADO: ', '');
   }
   return 'Error desconocido';
 }
@@ -204,6 +205,23 @@ function EditarProductoForm() {
         if (dupErr) throw dupErr;
         if (dup && dup.length > 0) {
           setError(`Ese código de barras ya pertenece a "${dup[0].nombre}".`);
+          return;
+        }
+        // ...o es un código ADICIONAL (de este u otro producto)
+        const { data: dupAd, error: dupAdErr } = await supabase
+          .from('codigos_barras')
+          .select('producto_id, productos(nombre)')
+          .eq('codigo', barras)
+          .limit(1);
+        if (dupAdErr) throw dupAdErr;
+        if (dupAd && dupAd.length > 0) {
+          const fila = dupAd[0] as { producto_id: string; productos: { nombre: string } | { nombre: string }[] | null };
+          const dueño = Array.isArray(fila.productos) ? fila.productos[0]?.nombre : fila.productos?.nombre;
+          setError(
+            fila.producto_id === id
+              ? 'Ese código ya está en los códigos adicionales de este producto. Quítalo de ahí primero.'
+              : `Ese código de barras ya es un código adicional de "${dueño ?? 'otro producto'}".`
+          );
           return;
         }
       }
@@ -463,7 +481,16 @@ function EditarProductoForm() {
                     className={FIELD}
                     value={form.codigo_barras}
                     onChange={(e) => set('codigo_barras', e.target.value)}
-                    placeholder="Opcional"
+                    placeholder="Opcional (código principal)"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className={LABEL}>Códigos de barras adicionales</label>
+                  <CodigosAdicionales
+                    productoId={id}
+                    nombreProducto={form.nombre.trim()}
+                    codigoPrincipal={form.codigo_barras}
                   />
                 </div>
 

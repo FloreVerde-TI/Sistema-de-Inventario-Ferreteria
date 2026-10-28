@@ -446,6 +446,8 @@ function UsuariosContenido() {
           rol={rolEditando === 'nuevo' ? null : rolEditando}
           perfil={perfil}
           enUso={rolEditando === 'nuevo' ? 0 : usuariosPorRol.get(rolEditando.nombre) ?? 0}
+          usuariosDelRol={rolEditando === 'nuevo' ? [] : usuarios.filter((u) => u.role === rolEditando.nombre)}
+          rolesDestino={rolEditando === 'nuevo' ? [] : rolesAsignables.filter((r) => r.id !== rolEditando.id)}
           onClose={() => setRolEditando(null)}
           onGuardado={async (msg) => {
             setRolEditando(null);
@@ -667,12 +669,16 @@ function RolModal({
   rol,
   perfil,
   enUso,
+  usuariosDelRol,
+  rolesDestino,
   onClose,
   onGuardado,
 }: {
   rol: Rol | null;
   perfil: PerfilSesion;
   enUso: number;
+  usuariosDelRol: Usuario[];
+  rolesDestino: Rol[];
   onClose: () => void;
   onGuardado: (msg: string) => void;
 }) {
@@ -683,6 +689,11 @@ function RolModal({
   const [permisos, setPermisos] = useState<string[]>(rol?.permisos ?? []);
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState<'guardar' | 'borrar' | null>(null);
+  // Borrar un rol con usuarios: primero se pasan a otro rol
+  const [destino, setDestino] = useState(
+    rolesDestino.find((r) => r.nombre === 'Empleado')?.nombre ?? rolesDestino[rolesDestino.length - 1]?.nombre ?? ''
+  );
+  const [confirmarBorrar, setConfirmarBorrar] = useState(false);
 
   // Solo se pueden dar permisos que uno mismo tiene
   const puedeDar = (p: Permiso) => perfil.esSuper || perfil.permisos.includes(p);
@@ -724,11 +735,40 @@ function RolModal({
   async function borrar() {
     if (!rol) return;
     setError(null);
+    if (enUso > 0 && !destino) return setError('Elige a qué rol pasar a los usuarios.');
+    // Primer clic: pide confirmación
+    if (!confirmarBorrar) {
+      setConfirmarBorrar(true);
+      return;
+    }
     setGuardando('borrar');
+
+    // 1. Mover a los usuarios al rol elegido (uno por uno, por la ruta segura del servidor)
+    for (const u of usuariosDelRol) {
+      try {
+        await llamarApi({ accion: 'editar', id: u.id, nombre: u.full_name, rol: destino });
+      } catch (e) {
+        setError(`No se pudo mover a ${u.full_name}: ${errorDe(e)}. El rol no se borró.`);
+        setGuardando(null);
+        setConfirmarBorrar(false);
+        return;
+      }
+    }
+    if (usuariosDelRol.length > 0) {
+      await registrarActividad({
+        accion: 'editar',
+        entidad: 'rol',
+        entidad_id: rol.id,
+        detalle: `Pasó ${usuariosDelRol.length} usuario(s) del rol ${rol.nombre} al rol ${destino}`,
+      });
+    }
+
+    // 2. Borrar el rol
     const { data, error: err } = await supabase.from('roles').delete().eq('id', rol.id).select('id');
     if (err || !data || data.length === 0) {
-      setError(err?.code === '23503' ? 'Hay usuarios con este rol. Cámbiales el rol antes de borrarlo.' : err ? errorDe(err) : 'No se pudo borrar el rol.');
+      setError(err?.code === '23503' ? 'Todavía hay usuarios con este rol. Cierra, recarga la página e inténtalo de nuevo.' : err ? errorDe(err) : 'No se pudo borrar el rol.');
       setGuardando(null);
+      setConfirmarBorrar(false);
       return;
     }
     await registrarActividad({ accion: 'eliminar', entidad: 'rol', entidad_id: rol.id, detalle: `Eliminó el rol ${rol.nombre}` });
@@ -790,6 +830,41 @@ function RolModal({
           <p className="text-xs text-text-muted">Todos pueden ver Dashboard, Productos, Movimientos, Pedidos y Código de barras.</p>
         </div>
 
+        {rol && !rol.es_sistema && enUso > 0 && (
+          <div className="border border-border rounded-lg p-3 space-y-2">
+            <p className="text-xs font-semibold text-text">
+              Para borrar este rol, primero se pasan sus {enUso} usuario(s) a otro rol:
+            </p>
+            <p className="text-xs text-text-muted">{usuariosDelRol.map((u) => u.full_name).join(', ')}</p>
+            {rolesDestino.length > 0 ? (
+              <select
+                className={FIELD}
+                value={destino}
+                onChange={(e) => {
+                  setDestino(e.target.value);
+                  setConfirmarBorrar(false);
+                }}
+              >
+                {rolesDestino.map((r) => (
+                  <option key={r.id} value={r.nombre}>
+                    Pasarlos a: {r.nombre}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-xs text-danger">No tienes otro rol disponible para pasarlos.</p>
+            )}
+          </div>
+        )}
+
+        {confirmarBorrar && (
+          <p className="text-sm text-danger font-medium">
+            {enUso > 0
+              ? `¿Seguro? Se pasarán ${enUso} usuario(s) a ${destino} y se borrará el rol ${rol?.nombre}. Presiona otra vez para confirmar.`
+              : `¿Seguro que quieres borrar el rol ${rol?.nombre}? Presiona otra vez para confirmar.`}
+          </p>
+        )}
+
         <ErrorBox texto={error} />
 
         <div className="flex items-center justify-between gap-3 pt-2">
@@ -798,11 +873,14 @@ function RolModal({
               <button
                 type="button"
                 onClick={borrar}
-                disabled={guardando !== null || enUso > 0}
-                title={enUso > 0 ? 'Hay usuarios con este rol' : 'Borrar rol'}
-                className="px-3 py-2 text-sm font-medium text-danger rounded-lg hover:bg-danger-soft transition-colors flex items-center gap-2 disabled:opacity-40"
+                disabled={guardando !== null || (enUso > 0 && rolesDestino.length === 0)}
+                title={enUso > 0 ? 'Pasa a los usuarios a otro rol y borra este' : 'Borrar rol'}
+                className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 disabled:opacity-40 ${
+                  confirmarBorrar ? 'bg-danger text-white hover:opacity-90' : 'text-danger hover:bg-danger-soft'
+                }`}
               >
-                <Trash2 size={16} /> Borrar rol
+                {guardando === 'borrar' ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                {confirmarBorrar ? 'Sí, borrar' : enUso > 0 ? 'Mover y borrar rol' : 'Borrar rol'}
               </button>
             )}
           </div>

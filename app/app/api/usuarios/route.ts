@@ -138,6 +138,16 @@ export async function POST(req: Request) {
           app_metadata: { role: rol.nombre },
         });
         if (error || !data.user) throw new ErrorUsuario(traducir(error?.message ?? 'No se pudo crear.'));
+
+        // El trigger crea el perfil con el rol por defecto (Empleado):
+        // aquí se le pone el rol elegido y el nombre
+        const { error: perfilErr } = await db
+          .from('profiles')
+          .update({ full_name: nombre, role: rol.nombre, updated_at: new Date().toISOString() })
+          .eq('id', data.user.id);
+        if (perfilErr)
+          throw new ErrorUsuario(`El usuario se creó, pero no se pudo asignar el rol (${perfilErr.message}). Edítalo con el lápiz.`);
+
         await bitacora(db, q, 'crear', data.user.id, `Creó el usuario ${nombre} (${email}) como ${rol.nombre}`);
         return NextResponse.json({ ok: true });
       }

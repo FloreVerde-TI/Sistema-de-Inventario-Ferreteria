@@ -53,8 +53,18 @@ type Datos = {
   imagen: string | null;
 };
 type Fila = { n: number; datos: Datos; errores: string[]; avisos: string[] };
-type Analisis = { hoja: string; columnas: Campo[]; filas: Fila[] };
-type Etapa = 'elegir' | 'revisar' | 'importando' | 'listo';
+type Encabezado = { letra: string; titulo: string; campo: Campo | null };
+type Analisis = {
+  hoja: string;
+  columnas: Campo[];
+  encabezados: Encabezado[];
+  filas: Fila[];
+  categoriasExistentes: Set<string>;
+  proveedoresExistentes: Set<string>;
+};
+// elegir → confirmarArchivo (¿es el archivo correcto?) → revisar (fila por fila)
+// → confirmarImport (resumen final) → importando → listo
+type Etapa = 'elegir' | 'confirmarArchivo' | 'revisar' | 'confirmarImport' | 'importando' | 'listo';
 
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
 const BTN =
@@ -227,6 +237,13 @@ function descargarErrores(filas: Fila[]) {
   XLSX.writeFile(libro, 'productos_con_error.xlsx');
 }
 
+// Letra de columna como en Excel (0 → A, 26 → AA)
+function letraColumna(i: number): string {
+  let s = '';
+  for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  return s;
+}
+
 function trozos<T>(lista: T[], tam: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < lista.length; i += tam) out.push(lista.slice(i, i + tam));
@@ -246,11 +263,29 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
   const [soloProblemas, setSoloProblemas] = useState(false);
   const [progreso, setProgreso] = useState({ hecho: 0, total: 0 });
   const [resultado, setResultado] = useState<string | null>(null);
+  const [aceptado, setAceptado] = useState(false);
 
   const filas = analisis?.filas ?? [];
   const validas = useMemo(() => filas.filter((f) => f.errores.length === 0), [filas]);
   const conError = filas.length - validas.length;
   const conAviso = validas.filter((f) => f.avisos.length > 0).length;
+  // Resumen para la confirmación final
+  const resumen = useMemo(() => {
+    if (!analisis) return null;
+    const cats = new Set<string>();
+    const provs = new Set<string>();
+    validas.forEach(({ datos: d }) => {
+      if (d.categoria && !analisis.categoriasExistentes.has(d.categoria.toLowerCase())) cats.add(d.categoria.toLowerCase());
+      if (d.proveedor && !analisis.proveedoresExistentes.has(d.proveedor.toLowerCase())) provs.add(d.proveedor.toLowerCase());
+    });
+    return {
+      categoriasNuevas: cats.size,
+      proveedoresNuevos: provs.size,
+      unidades: validas.reduce((t, f) => t + f.datos.stock, 0),
+      enWeb: validas.filter((f) => f.datos.web).length,
+    };
+  }, [analisis, validas]);
+
   const visibles = (soloProblemas ? filas.filter((f) => f.errores.length || f.avisos.length) : filas).slice(0, 300);
 
   async function leerArchivo(e: React.ChangeEvent<HTMLInputElement>) {
@@ -289,11 +324,13 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
       if (datosFilas.length > MAX_FILAS) throw new Error(`El archivo tiene más de ${MAX_FILAS} filas. Divídelo en partes.`);
 
       // Lo que ya existe en el sistema (para no duplicar)
-      const [prodRes, cfgRes] = await Promise.all([
+      const [prodRes, cfgRes, catRes, provRes] = await Promise.all([
         traerTodo<{ nombre: string; sku: string | null; codigo_barras: string | null }>((a, b) =>
           supabase.from('productos').select('nombre, sku, codigo_barras').order('id').range(a, b)
         ),
         supabase.from('settings').select('stock_minimo_defecto').eq('id', 1).maybeSingle(),
+        supabase.from('categorias').select('nombre'),
+        supabase.from('proveedores').select('nombre'),
       ]);
       if (prodRes.error) throw new Error(prodRes.error.message);
       const ex: Existentes = {
@@ -318,8 +355,21 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
       });
       if (resultadoFilas.length === 0) throw new Error('El archivo tiene los títulos correctos pero no tiene productos debajo.');
 
-      setAnalisis({ hoja: encontrado.hoja, columnas: [...encontrado.titulos.mapa.values()], filas: resultadoFilas });
-      setEtapa('revisar');
+      const titulosExcel = encontrado.filas[encontrado.titulos.fila] ?? [];
+      const encabezados: Encabezado[] = titulosExcel
+        .map((t, i) => ({ letra: letraColumna(i), titulo: texto(t), campo: encontrado!.titulos.mapa.get(i) ?? null }))
+        .filter((e) => e.titulo !== '');
+
+      setAnalisis({
+        hoja: encontrado.hoja,
+        columnas: [...encontrado.titulos.mapa.values()],
+        encabezados,
+        filas: resultadoFilas,
+        categoriasExistentes: new Set(((catRes.data ?? []) as { nombre: string }[]).map((c) => c.nombre.trim().toLowerCase())),
+        proveedoresExistentes: new Set(((provRes.data ?? []) as { nombre: string }[]).map((c) => c.nombre.trim().toLowerCase())),
+      });
+      setAceptado(false);
+      setEtapa('confirmarArchivo');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo leer el archivo.');
     } finally {
@@ -422,7 +472,8 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
         (err instanceof Error ? err.message : 'Error al importar.') +
           (creados ? ` (Ya se habían importado ${creados}; si vuelves a importar el archivo, esos se detectan como existentes).` : '')
       );
-      setEtapa('revisar');
+      setEtapa('confirmarImport');
+      setAceptado(false);
       if (creados) onImportado();
     }
   }
@@ -484,8 +535,106 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
             </div>
           )}
 
+          {etapa === 'confirmarArchivo' && analisis && (
+            <div className="space-y-4">
+              <div className="bg-info-soft text-sky-900 border border-sky-200 rounded-lg p-4 text-sm">
+                <p className="font-semibold">Paso 1 de 3 · ¿Es este el archivo correcto?</p>
+                <p className="mt-1">
+                  Se leyó la hoja <strong>&quot;{analisis.hoja}&quot;</strong> con <strong>{filas.length}</strong>{' '}
+                  {filas.length === 1 ? 'fila' : 'filas'} de productos. Revisa cómo se entendió cada columna y los primeros productos.
+                  Todavía no se ha guardado nada.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <table className="w-full text-left text-[13px]">
+                    <thead className="bg-surface-alt border-b border-border">
+                      <tr>
+                        <th className="px-3 py-2 text-xs font-semibold uppercase text-text-soft">Columna en tu Excel</th>
+                        <th className="px-3 py-2 text-xs font-semibold uppercase text-text-soft">Se usará como</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {analisis.encabezados.map((e) => (
+                        <tr key={e.letra}>
+                          <td className="px-3 py-2 text-text">
+                            <span className="text-text-muted mr-2">{e.letra}</span>
+                            {e.titulo}
+                          </td>
+                          <td className="px-3 py-2">
+                            {e.campo ? (
+                              <span className="text-success font-medium">{CAMPOS.find((c) => c.campo === e.campo)?.titulo}</span>
+                            ) : (
+                              <span className="text-text-muted italic">Se ignora</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="space-y-3">
+                  {CAMPOS.filter((c) => !analisis.columnas.includes(c.campo)).length > 0 && (
+                    <div className="bg-warning-soft text-amber-900 border border-amber-200 rounded-lg p-3 text-sm">
+                      <p className="font-semibold">Datos que no vienen en el Excel (quedarán vacíos):</p>
+                      <p className="mt-1">
+                        {CAMPOS.filter((c) => !analisis.columnas.includes(c.campo))
+                          .map((c) => c.titulo)
+                          .join(', ')}
+                      </p>
+                    </div>
+                  )}
+                  <div className="border border-border rounded-lg p-3">
+                    <p className="text-xs font-semibold uppercase text-text-soft mb-2">Primeros productos leídos</p>
+                    <ul className="space-y-1.5 text-sm">
+                      {filas.slice(0, 5).map((f) => (
+                        <li key={f.n} className="flex justify-between gap-3">
+                          <span className="text-text truncate">{f.datos.nombre || <em className="text-danger">(sin nombre)</em>}</span>
+                          <span className="text-text-soft whitespace-nowrap">
+                            ₡{f.datos.precio.toLocaleString('es-CR')} · {f.datos.stock} u.
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {etapa === 'confirmarImport' && resumen && (
+            <div className="space-y-4">
+              <div className="bg-info-soft text-sky-900 border border-sky-200 rounded-lg p-4 text-sm">
+                <p className="font-semibold">Paso 3 de 3 · ¿Confirmas la importación?</p>
+                <p className="mt-1">Esto es exactamente lo que se guardará en el sistema:</p>
+              </div>
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <Dato valor={validas.length} texto="productos nuevos" />
+                <Dato valor={resumen.unidades} texto="unidades de stock inicial (como Entradas en Movimientos)" />
+                <Dato valor={resumen.categoriasNuevas} texto="categorías nuevas" />
+                <Dato valor={resumen.proveedoresNuevos} texto="proveedores nuevos" />
+                <Dato valor={resumen.enWeb} texto="productos se publicarán en la web" />
+                <Dato valor={conError} texto="filas con error que NO se importarán" peligro={conError > 0} />
+              </ul>
+              <label className="flex items-start gap-3 text-sm text-text cursor-pointer border border-border rounded-lg p-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                  checked={aceptado}
+                  onChange={(e) => setAceptado(e.target.checked)}
+                />
+                Revisé la información y quiero importar estos {validas.length} productos.
+              </label>
+            </div>
+          )}
+
           {(etapa === 'revisar' || etapa === 'importando') && analisis && (
             <>
+              {etapa === 'revisar' && (
+                <p className="text-sm font-semibold text-text">Paso 2 de 3 · Revisión de cada fila</p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Resumen icono={<CheckCircle2 size={18} />} clase="bg-success-soft text-green-800" valor={validas.length - conAviso} texto="Listas para importar" />
                 <Resumen icono={<AlertTriangle size={18} />} clase="bg-warning-soft text-amber-800" valor={conAviso} texto="Se importan con aviso" />
@@ -578,7 +727,7 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
         </div>
 
         <div className="p-5 border-t border-border flex justify-between gap-3">
-          {etapa === 'revisar' ? (
+          {etapa === 'confirmarArchivo' || etapa === 'revisar' ? (
             <button
               type="button"
               onClick={() => {
@@ -588,7 +737,11 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
               }}
               className={BTN}
             >
-              Elegir otro archivo
+              {etapa === 'confirmarArchivo' ? 'No, elegir otro archivo' : 'Elegir otro archivo'}
+            </button>
+          ) : etapa === 'confirmarImport' ? (
+            <button type="button" onClick={() => setEtapa('revisar')} className={BTN}>
+              Volver a la revisión
             </button>
           ) : (
             <span />
@@ -599,10 +752,28 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
                 {etapa === 'listo' ? 'Cerrar' : 'Cancelar'}
               </button>
             )}
-            {(etapa === 'revisar' || etapa === 'importando') && (
-              <button type="button" disabled={etapa === 'importando' || validas.length === 0} onClick={importar} className={BTN_PRIMARY}>
+            {etapa === 'confirmarArchivo' && (
+              <button type="button" onClick={() => setEtapa('revisar')} className={BTN_PRIMARY}>
+                Sí, es el archivo correcto
+              </button>
+            )}
+            {etapa === 'revisar' && (
+              <button
+                type="button"
+                disabled={validas.length === 0}
+                onClick={() => {
+                  setAceptado(false);
+                  setEtapa('confirmarImport');
+                }}
+                className={BTN_PRIMARY}
+              >
+                {validas.length === 0 ? 'No hay filas válidas' : `Continuar con ${validas.length} productos`}
+              </button>
+            )}
+            {(etapa === 'confirmarImport' || etapa === 'importando') && (
+              <button type="button" disabled={etapa === 'importando' || !aceptado} onClick={importar} className={BTN_PRIMARY}>
                 {etapa === 'importando' ? <Loader2 size={16} className="animate-spin" /> : <FileUp size={16} />}
-                {validas.length === 0 ? 'No hay filas válidas' : `Importar ${validas.length} productos`}
+                {etapa === 'importando' ? 'Importando...' : 'Sí, importar'}
               </button>
             )}
           </div>
@@ -621,5 +792,14 @@ function Resumen({ icono, clase, valor, texto: t }: { icono: React.ReactNode; cl
         <p className="text-xs mt-1">{t}</p>
       </div>
     </div>
+  );
+}
+
+function Dato({ valor, texto: t, peligro = false }: { valor: number; texto: string; peligro?: boolean }) {
+  return (
+    <li className={`border rounded-lg p-3 flex items-center gap-3 ${peligro ? 'border-danger/30 bg-danger-soft' : 'border-border'}`}>
+      <span className={`text-2xl font-bold ${peligro ? 'text-danger' : 'text-text'}`}>{valor.toLocaleString('es-CR')}</span>
+      <span className="text-text-soft">{t}</span>
+    </li>
   );
 }

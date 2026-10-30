@@ -28,6 +28,7 @@ import {
   FileText,
   AlertTriangle,
   Check,
+  Percent,
 } from 'lucide-react';
 
 type ProductRow = { proveedor_id: string | null } & Pick<
@@ -375,6 +376,14 @@ function ProductosContenido() {
               >
                 <FileUp size={16} /> Importar Excel
               </button>
+            </SiPuede>
+            <SiPuede permiso="productos_editar">
+              <Link
+                href="/productos/precios"
+                className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2"
+              >
+                <Percent size={16} /> Actualizar precios
+              </Link>
             </SiPuede>
             <SiPuede permiso="productos_crear">
               <Link

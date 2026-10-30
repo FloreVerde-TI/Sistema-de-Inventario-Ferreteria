@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { registrarActividad } from '@/lib/actividad';
@@ -102,6 +102,29 @@ export default function PedidosPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<PedidoRow | null>(null);
   const [reopening, setReopening] = useState<PedidoRow | null>(null);
+  // Tiempo real: cuando llega o cambia un pedido, la lista se recarga sola (sin parpadear)
+  const [refresco, setRefresco] = useState(0);
+  const silencioso = useRef(false);
+
+  useEffect(() => {
+    let espera: ReturnType<typeof setTimeout> | undefined;
+    const canal = supabase
+      .channel('pedidos-pantalla')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, (cambio) => {
+        if (cambio.eventType === 'INSERT') setNotice('🔔 Llegó un pedido nuevo desde la web.');
+        // Se espera un momento para que el pedido termine de guardarse con sus productos
+        clearTimeout(espera);
+        espera = setTimeout(() => {
+          silencioso.current = true;
+          setRefresco((n) => n + 1);
+        }, 800);
+      })
+      .subscribe();
+    return () => {
+      clearTimeout(espera);
+      supabase.removeChannel(canal);
+    };
+  }, []);
 
   // Al salir de la pantalla, filtros, búsqueda y página vuelven a empezar
   useEffect(() => {
@@ -117,7 +140,9 @@ export default function PedidosPage() {
     let cancelled = false;
 
     async function load() {
-      setLoading(true);
+      // Las recargas automáticas no muestran el "cargando"
+      if (!silencioso.current) setLoading(true);
+      silencioso.current = false;
       let query = supabase
         .from('pedidos')
         .select(COLUMNS, { count: 'exact' })
@@ -156,7 +181,7 @@ export default function PedidosPage() {
     return () => {
       cancelled = true;
     };
-  }, [applied, page]);
+  }, [applied, page, refresco]);
 
   const setDraftField = <K extends keyof Filters>(key: K, value: Filters[K]) =>
     setDraft((prev) => ({ ...prev, [key]: value }));

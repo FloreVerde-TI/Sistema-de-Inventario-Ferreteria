@@ -6,13 +6,14 @@ import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { Product, Movimiento } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
+import { VerDocumento } from '@/components/Documento';
 import { Search, Download, ChevronDown, FileSpreadsheet, FileText, X, Loader2 } from 'lucide-react';
 
 type ProductName = Pick<Product, 'id' | 'nombre'>;
 type MovimientoRow = Pick<
   Movimiento,
   'id' | 'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'origen' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
->;
+> & { documento_path: string | null };
 type TipoFilter = 'all' | 'entrada' | 'salida';
 
 type Filters = {
@@ -26,7 +27,7 @@ type Filters = {
 const EMPTY_FILTERS: Filters = { search: '', desde: '', hasta: '', tipo: 'all', producto: 'all' };
 const PAGE_SIZE = 20;
 const EXPORT_PAGE = 1000; // límite de filas por consulta en Supabase
-const FIELDS = 'id, producto_id, tipo, cantidad, motivo, usuario, origen, proveedor, referencia, observaciones, created_at';
+const FIELDS = 'id, producto_id, tipo, cantidad, motivo, usuario, origen, proveedor, referencia, observaciones, documento_path, created_at';
 
 // Tarjeta blanca que se mantiene clara en modo oscuro (ver .card-light en globals.css)
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
@@ -429,6 +430,7 @@ export default function MovimientosPage() {
                               {m.observaciones}
                             </div>
                           )}
+                          <VerDocumento ruta={m.documento_path} />
                         </td>
                       </tr>
                     ))

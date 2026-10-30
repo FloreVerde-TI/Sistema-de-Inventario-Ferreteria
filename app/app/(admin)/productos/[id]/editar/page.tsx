@@ -61,6 +61,8 @@ const FIELD =
 const LABEL = 'block text-xs font-semibold uppercase tracking-wide text-text-soft mb-1';
 
 function errorMessage(err: unknown): string {
+  if (typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505')
+    return 'Ya existe una categoría o proveedor con ese nombre. Si está deshabilitado, habilítalo en Configuración → Catálogos.';
   if (err instanceof Error) return err.message.replace('CODIGO_DUPLICADO: ', '');
   if (typeof err === 'object' && err !== null && 'message' in err) {
     return String((err as { message: unknown }).message).replace('CODIGO_DUPLICADO: ', '');
@@ -130,12 +132,18 @@ function EditarProductoForm() {
 
     async function fetchData() {
       const [catRes, prodRes, provRes] = await Promise.all([
-        supabase.from('categorias').select('id, nombre').order('nombre'),
+        supabase.from('categorias').select('id, nombre, activa').order('nombre'),
         supabase.from('productos').select(PRODUCT_FIELDS).eq('id', id).maybeSingle(),
-        supabase.from('proveedores').select('id, nombre').order('nombre'),
+        supabase.from('proveedores').select('id, nombre, activo').order('nombre'),
       ]);
       if (!active) return;
-      setProveedores((provRes.data ?? []) as ProveedorRow[]);
+      // Deshabilitados no se ofrecen, salvo el que ya tiene este producto
+      const actual = prodRes.data as unknown as { categoria_id: string | null; proveedor_id: string | null } | null;
+      setProveedores(
+        ((provRes.data ?? []) as (ProveedorRow & { activo: boolean | null })[])
+          .filter((p) => p.activo !== false || p.id === actual?.proveedor_id)
+          .map(({ id, nombre }) => ({ id, nombre }))
+      );
 
       const failed = catRes.error ?? prodRes.error;
       if (failed) {
@@ -144,7 +152,11 @@ function EditarProductoForm() {
         setNotFound(true);
       } else {
         const p = prodRes.data as unknown as ProductRow;
-        setCategories((catRes.data ?? []) as CategoryRow[]);
+        setCategories(
+          ((catRes.data ?? []) as (CategoryRow & { activa: boolean | null })[])
+            .filter((c) => c.activa !== false || c.id === actual?.categoria_id)
+            .map(({ id, nombre }) => ({ id, nombre }))
+        );
         setForm(toForm(p));
         setStock(p.stock ?? 0);
         setHabilitadoOriginal(p.habilitado !== false);

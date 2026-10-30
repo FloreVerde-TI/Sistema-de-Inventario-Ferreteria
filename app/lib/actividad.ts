@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 
-export type EntidadActividad = 'producto' | 'pedido' | 'usuario' | 'rol' | 'configuracion';
+export type EntidadActividad = 'producto' | 'categoria' | 'proveedor' | 'pedido' | 'cotizacion' | 'usuario' | 'rol' | 'configuracion';
 
 /**
  * Guarda una acción en la Bitácora.

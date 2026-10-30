@@ -58,6 +58,8 @@ const FIELD =
 const LABEL = 'block text-xs font-semibold uppercase tracking-wide text-text-soft mb-1';
 
 function errorMessage(err: unknown): string {
+  if (typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505')
+    return 'Ya existe una categoría o proveedor con ese nombre. Si está deshabilitado, habilítalo en Configuración → Catálogos.';
   if (err instanceof Error) return err.message.replace('CODIGO_DUPLICADO: ', '');
   if (typeof err === 'object' && err !== null && 'message' in err) {
     return String((err as { message: unknown }).message).replace('CODIGO_DUPLICADO: ', '');
@@ -89,7 +91,7 @@ function NuevoProductoForm() {
   useEffect(() => {
     async function loadData() {
       const [catRes, cfgRes, provRes] = await Promise.all([
-        supabase.from('categorias').select('id, nombre').order('nombre'),
+        supabase.from('categorias').select('id, nombre').eq('activa', true).order('nombre'),
         supabase.from('settings').select('stock_minimo_defecto').eq('id', 1).maybeSingle(),
         supabase.from('proveedores').select('id, nombre').eq('activo', true).order('nombre'),
       ]);

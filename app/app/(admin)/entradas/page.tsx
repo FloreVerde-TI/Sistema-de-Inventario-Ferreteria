@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { etiquetaUsuario } from '@/lib/actividad';
 import SiPuede from '@/components/SiPuede';
+import { AdjuntarDocumento, VerDocumento } from '@/components/Documento';
+import { subirDocumento } from '@/lib/documentos';
 import { Product, Movimiento } from '@/types';
 import { Loader2, ArrowDownCircle, ScanLine } from 'lucide-react';
 
@@ -15,7 +17,7 @@ type ProveedorRow = { id: string; nombre: string };
 type EntradaRow = Pick<
   Movimiento,
   'id' | 'producto_id' | 'cantidad' | 'motivo' | 'usuario' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
->;
+> & { documento_path: string | null };
 
 type FormState = {
   producto_id: string;
@@ -68,6 +70,8 @@ export default function EntradasPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Foto o PDF de la factura / comprobante (opcional)
+  const [documento, setDocumento] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [fromBarcode, setFromBarcode] = useState(false);
@@ -81,7 +85,7 @@ export default function EntradasPage() {
       ),
       supabase
         .from('movimientos')
-        .select('id, producto_id, cantidad, motivo, usuario, proveedor, referencia, observaciones, created_at')
+        .select('id, producto_id, cantidad, motivo, usuario, proveedor, referencia, observaciones, documento_path, created_at')
         .eq('tipo', 'entrada')
         .gte('created_at', since)
         .order('created_at', { ascending: false })
@@ -175,7 +179,11 @@ export default function EntradasPage() {
           .select('id, nombre')
           .single();
         if (provErr) {
-          setError(`No se pudo crear el proveedor: ${provErr.message}`);
+          setError(
+            provErr.code === '23505'
+              ? 'Ya existe un proveedor con ese nombre. Si está deshabilitado, habilítalo en Configuración → Catálogos.'
+              : `No se pudo crear el proveedor: ${provErr.message}`
+          );
           setSaving(false);
           return;
         }
@@ -191,6 +199,18 @@ export default function EntradasPage() {
     const usuario = await etiquetaUsuario();
 
     // tipo SIEMPRE en minúscula: el trigger solo suma stock con 'entrada' exacto
+    // Documento adjunto: se sube primero para guardar su ruta en el movimiento
+    let documentoPath: string | null = null;
+    if (documento) {
+      try {
+        documentoPath = await subirDocumento(documento, 'entrada');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'No se pudo subir el documento.');
+        setSaving(false);
+        return;
+      }
+    }
+
     const { error: insertError } = await supabase.from('movimientos').insert({
       producto_id: form.producto_id,
       tipo: 'entrada',
@@ -201,6 +221,7 @@ export default function EntradasPage() {
       usuario,
       origen: 'panel',
       observaciones: form.observaciones.trim() || null,
+      documento_path: documentoPath,
     });
 
     if (insertError) {
@@ -209,6 +230,7 @@ export default function EntradasPage() {
     } else {
       setSuccess('Entrada registrada correctamente.');
       setForm(EMPTY_FORM);
+      setDocumento(null);
       await loadData();
     }
     setSaving(false);
@@ -348,6 +370,11 @@ export default function EntradasPage() {
                 {form.observaciones.length}/{MAX_OBS}
               </span>
             </div>
+
+            <div className="col-span-2 flex flex-col gap-1.5">
+              <label className={LABEL}>Foto de la factura o comprobante (opcional)</label>
+              <AdjuntarDocumento archivo={documento} onChange={setDocumento} />
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 mt-6 pt-5 border-t border-border">
@@ -355,6 +382,7 @@ export default function EntradasPage() {
               type="button"
               onClick={() => {
                 setForm(EMPTY_FORM);
+                setDocumento(null);
                 setError(null);
                 setSuccess(null);
               }}
@@ -408,7 +436,14 @@ export default function EntradasPage() {
                         </td>
                         <td className={`${TD} text-text-soft`}>{m.proveedor || '—'}</td>
                         <td className={`${TD} text-right font-semibold text-success`}>+{m.cantidad}</td>
-                        <td className={`${TD} text-text-soft`}>{m.referencia || '—'}</td>
+                        <td className={`${TD} text-text-soft`}>
+                          {m.referencia || (m.documento_path ? '' : '—')}
+                          {m.documento_path && (
+                            <div>
+                              <VerDocumento ruta={m.documento_path} />
+                            </div>
+                          )}
+                        </td>
                         <td className={`${TD} text-text-soft`}>
                           {m.motivo || '—'}
                           {m.observaciones && (

@@ -24,7 +24,10 @@ const COLUMNAS = 'id, usuario, accion, entidad, entidad_id, detalle, created_at'
 
 const ENTIDADES: Record<string, string> = {
   producto: 'Producto',
+  categoria: 'Categoría',
+  proveedor: 'Proveedor',
   pedido: 'Pedido web',
+  cotizacion: 'Cotización web',
   usuario: 'Usuario',
   rol: 'Rol',
   configuracion: 'Configuración',
@@ -39,6 +42,8 @@ const ACCIONES: Record<string, { label: string; clase: string }> = {
   aprobar: { label: 'Aprobó', clase: 'bg-success-soft text-green-800' },
   rechazar: { label: 'Rechazó', clase: 'bg-danger-soft text-red-800' },
   reabrir: { label: 'Reabrió', clase: 'bg-warning-soft text-amber-800' },
+  responder: { label: 'Respondió', clase: 'bg-info-soft text-sky-800' },
+  cerrar: { label: 'Cerró', clase: 'bg-surface-alt text-text-soft' },
   activar: { label: 'Activó', clase: 'bg-success-soft text-green-800' },
   desactivar: { label: 'Desactivó', clase: 'bg-warning-soft text-amber-800' },
   cambiar_contrasena: { label: 'Cambió contraseña', clase: 'bg-info-soft text-sky-800' },

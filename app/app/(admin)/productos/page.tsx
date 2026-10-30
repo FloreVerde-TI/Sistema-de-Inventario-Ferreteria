@@ -261,6 +261,29 @@ function ProductosContenido() {
     fetchData();
   }, [recarga]);
 
+  // Tiempo real: si cambia un producto, entra un movimiento (entrada, salida, venta web)
+  // o cambia un pedido (rechazo = devuelve stock), la lista se vuelve a leer sola,
+  // sin parpadear (con una pequeña espera por si llegan varios cambios juntos).
+  useEffect(() => {
+    let espera: ReturnType<typeof setTimeout> | undefined;
+    const refrescar = () => {
+      clearTimeout(espera);
+      espera = setTimeout(() => setRecarga((n) => n + 1), 700);
+    };
+    const canal = supabase
+      .channel(`productos-lista-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, refrescar)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'movimientos' }, refrescar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, refrescar)
+      .subscribe((estado) => {
+        if (estado !== 'SUBSCRIBED') console.warn('Tiempo real de productos:', estado);
+      });
+    return () => {
+      clearTimeout(espera);
+      supabase.removeChannel(canal);
+    };
+  }, []);
+
   const categoryName = useMemo(() => new Map(categories.map((c) => [c.id, c.nombre])), [categories]);
   const proveedorName = useMemo(() => new Map(proveedores.map((p) => [p.id, p.nombre])), [proveedores]);
 

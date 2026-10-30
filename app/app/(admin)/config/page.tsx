@@ -334,6 +334,7 @@ export default function ConfigPage() {
                   <SubirImagen
                     carpeta="empresa"
                     texto="Subir logo"
+                    conCamara={false}
                     onSubida={(url) => {
                       set('logo_url', url);
                       setLogoFallo(false);

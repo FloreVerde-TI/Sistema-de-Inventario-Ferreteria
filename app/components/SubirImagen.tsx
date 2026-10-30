@@ -1,20 +1,25 @@
 "use client";
 
 import React, { useRef, useState } from 'react';
-import { Upload, Loader2 } from 'lucide-react';
+import { Upload, Loader2, Camera } from 'lucide-react';
 import { subirImagen, type CarpetaImagen } from '@/lib/imagenes';
 
-/** Botón "Subir imagen": elige un archivo (o foto en celular), lo comprime, lo sube y devuelve el enlace. */
+/** Botones "Tomar foto" (abre la cámara en el celular) y "Subir imagen" (galería o archivo):
+ *  comprime la imagen, la sube y devuelve el enlace. */
 export default function SubirImagen({
   carpeta,
   onSubida,
   texto = 'Subir imagen',
+  conCamara = true,
 }: {
   carpeta: CarpetaImagen;
   onSubida: (url: string) => void;
   texto?: string;
+  /** false = solo "Subir imagen" (p. ej. el logo de la empresa) */
+  conCamara?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const camaraRef = useRef<HTMLInputElement>(null);
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,15 +41,29 @@ export default function SubirImagen({
   return (
     <div className="space-y-1.5">
       <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={elegir} />
-      <button
-        type="button"
-        disabled={subiendo}
-        onClick={() => inputRef.current?.click()}
-        className="w-full px-3 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
-      >
-        {subiendo ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-        {subiendo ? 'Subiendo...' : texto}
-      </button>
+      {/* En el celular abre directo la cámara trasera; en la compu abre la selección de archivos */}
+      <input ref={camaraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={elegir} />
+      <div className="flex gap-2">
+        {conCamara && (
+          <button
+            type="button"
+            disabled={subiendo}
+            onClick={() => camaraRef.current?.click()}
+            className="flex-1 px-3 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            <Camera size={16} /> Tomar foto
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={subiendo}
+          onClick={() => inputRef.current?.click()}
+          className="flex-1 px-3 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+        >
+          {subiendo ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+          {subiendo ? 'Subiendo...' : texto}
+        </button>
+      </div>
       {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );

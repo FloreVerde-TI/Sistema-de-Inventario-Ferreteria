@@ -19,6 +19,7 @@ import {
   ShieldAlert,
   MapPin,
   Loader2,
+  MessageSquareText,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -35,6 +36,7 @@ export type Permiso =
   | 'salidas'
   | 'pedidos_revisar'
   | 'pedidos_reabrir'
+  | 'cotizaciones'
   | 'reportes'
   | 'usuarios_gestionar'
   | 'roles_gestionar'
@@ -87,6 +89,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'salidas', label: 'Salidas', icon: ArrowUpCircle, section: 'Principal', permiso: 'salidas' },
   { id: 'movimientos', label: 'Movimientos', icon: FileText, section: 'Principal' },
   { id: 'pedidos', label: 'Pedidos Web', icon: ShoppingCart, section: 'Operaciones' },
+  { id: 'cotizaciones', label: 'Cotizaciones', icon: MessageSquareText, section: 'Operaciones', permiso: 'cotizaciones' },
   { id: 'barcode', label: 'Código de Barras', icon: ScanLine, section: 'Operaciones' },
   { id: 'reportes', label: 'Reportes', icon: BarChart3, section: 'Operaciones', permiso: 'reportes' },
   { id: 'usuarios', label: 'Usuarios', icon: Users, section: 'Administración', permiso: 'usuarios_gestionar' },
@@ -97,6 +100,7 @@ const NAV_ITEMS: NavItem[] = [
 // Subpáginas que piden un permiso propio
 function permisoDeSubruta(pathname: string): Permiso | undefined {
   if (pathname === '/productos/nuevo') return 'productos_crear';
+  if (pathname === '/productos/precios') return 'productos_editar';
   if (/^\/productos\/[^/]+\/editar$/.test(pathname)) return 'productos_editar';
   return undefined;
 }
@@ -125,6 +129,8 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const [perfil, setPerfil] = useState<PerfilSesion | null>(null);
   // Cantidad de pedidos web pendientes (número rojo en el menú), en tiempo real
   const [pendientes, setPendientes] = useState(0);
+  // Cotizaciones nuevas (número celeste en el menú)
+  const [cotNuevas, setCotNuevas] = useState(0);
 
   useEffect(() => {
     if (!perfil) return;
@@ -138,19 +144,36 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         .or('estado.is.null,estado.ilike.pendiente');
       if (activo) setPendientes(count ?? 0);
     }
+    // Las cotizaciones solo se cuentan si el rol puede verlas
+    const veCotizaciones = tienePermiso(perfil, 'cotizaciones');
+    async function contarCot() {
+      if (!veCotizaciones) return;
+      const { count } = await supabase
+        .from('cotizaciones')
+        .select('id', { count: 'exact', head: true })
+        .or('estado.is.null,estado.ilike.nueva');
+      if (activo) setCotNuevas(count ?? 0);
+    }
     contar();
+    contarCot();
 
+    let esperaCot: ReturnType<typeof setTimeout> | undefined;
     const canal = supabase
       .channel('pedidos-menu')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
         clearTimeout(espera);
         espera = setTimeout(contar, 500);
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cotizaciones' }, () => {
+        clearTimeout(esperaCot);
+        esperaCot = setTimeout(contarCot, 500);
+      })
       .subscribe();
 
     return () => {
       activo = false;
       clearTimeout(espera);
+      clearTimeout(esperaCot);
       supabase.removeChannel(canal);
     };
   }, [perfil]);
@@ -158,8 +181,9 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   // La pestaña del navegador también avisa: "(2) FerreStock"
   useEffect(() => {
     const base = document.title.replace(/^\(\d+\)\s*/, '');
-    document.title = pendientes > 0 ? `(${pendientes}) ${base}` : base;
-  }, [pendientes, pathname]);
+    const avisos = pendientes + cotNuevas;
+    document.title = avisos > 0 ? `(${avisos}) ${base}` : base;
+  }, [pendientes, cotNuevas, pathname]);
 
   useEffect(() => {
     let activo = true;
@@ -288,6 +312,14 @@ function AdminShell({ children }: { children: React.ReactNode }) {
                               title={`${pendientes} pedido(s) pendiente(s)`}
                             >
                               {pendientes > 99 ? '99+' : pendientes}
+                            </span>
+                          )}
+                          {item.id === 'cotizaciones' && cotNuevas > 0 && (
+                            <span
+                              className="min-w-5 h-5 px-1.5 rounded-full bg-sky-600 text-white text-[11px] font-bold flex items-center justify-center"
+                              title={`${cotNuevas} cotización(es) nueva(s)`}
+                            >
+                              {cotNuevas > 99 ? '99+' : cotNuevas}
                             </span>
                           )}
                         </button>

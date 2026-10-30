@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { registrarActividad } from '@/lib/actividad';
 import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import SubirImagen from '@/components/SubirImagen';
+import GestionCatalogos from '@/components/GestionCatalogos';
 import { Building2, Package, FileText, Image as ImageIcon, Save, Loader2, X } from 'lucide-react';
 
 type Config = {
@@ -312,6 +313,9 @@ export default function ConfigPage() {
                 <p className="text-xs text-text-muted mt-2">{form.pie_reportes.length}/150 caracteres</p>
               </Seccion>
             </div>
+
+            {/* Catálogos: se guardan al instante, no dependen de "Guardar cambios" */}
+            <GestionCatalogos />
 
             <Seccion icon={ImageIcon} titulo="Logo de los reportes" sub="Si lo dejas vacío se usa el logo actual del sistema">
               <div className="flex gap-6 items-start">

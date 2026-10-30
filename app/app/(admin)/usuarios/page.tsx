@@ -59,10 +59,11 @@ const GRUPOS_PERMISOS: { grupo: string; items: { key: Permiso; label: string }[]
     ],
   },
   {
-    grupo: 'Pedidos web',
+    grupo: 'Pedidos y cotizaciones web',
     items: [
       { key: 'pedidos_revisar', label: 'Aprobar o rechazar' },
       { key: 'pedidos_reabrir', label: 'Reabrir pedidos' },
+      { key: 'cotizaciones', label: 'Ver y responder cotizaciones' },
     ],
   },
   {

@@ -118,10 +118,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Falta configurar SMTP_USER y SMTP_PASS (correo de la empresa) en el servidor.' }, { status: 500 });
     }
     console.error('Error en /api/cotizaciones:', e);
-    const msg =
-      e instanceof Error && /auth|login|credential/i.test(e.message)
-        ? 'El correo de la empresa rechazó el acceso. Revisa SMTP_USER y la contraseña de aplicación (SMTP_PASS).'
-        : 'No se pudo enviar el correo.';
+    // Mensaje claro según lo que respondió Gmail (nunca incluye la clave)
+    const m = e instanceof Error ? e.message : '';
+    const cod = (e as { responseCode?: number } | null)?.responseCode;
+    let msg = 'No se pudo enviar el correo.';
+    if (m.startsWith('CLAVE_MAL_LARGO:'))
+      msg = `SMTP_PASS tiene ${m.split(':')[1]} caracteres; la contraseña de aplicación de Google tiene 16. Revísala.`;
+    else if (cod === 534 || /5\.7\.9/.test(m))
+      msg = 'Gmail pide una CONTRASEÑA DE APLICACIÓN (no la contraseña normal de la cuenta). (Código 534)';
+    else if (cod === 535 || /5\.7\.8/.test(m))
+      msg = 'Gmail rechazó el usuario o la clave: revisa que SMTP_USER sea la misma cuenta donde creaste la contraseña de aplicación. (Código 535)';
+    else if (/auth|login|credential/i.test(m)) msg = `El correo de la empresa rechazó el acceso. (${m.slice(0, 120)})`;
+    else if (m) msg = `No se pudo enviar el correo. (${m.slice(0, 120)})`;
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

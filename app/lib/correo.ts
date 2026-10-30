@@ -149,9 +149,11 @@ export function pieTexto(e: Empresa): string {
 
 /** Envía con la cuenta de Gmail de la empresa (SMTP_USER / SMTP_PASS). */
 export async function enviarCorreo(m: { para: string; asunto: string; texto: string; html: string; responderA?: string; nombreRemitente: string }) {
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  // Se limpian espacios y saltos de línea (Google muestra la clave en grupos de 4)
+  const user = (process.env.SMTP_USER ?? '').trim();
+  const pass = (process.env.SMTP_PASS ?? '').replace(/\s+/g, '');
   if (!user || !pass) throw new Error('FALTA_SMTP');
+  if (pass.length !== 16) throw new Error(`CLAVE_MAL_LARGO:${pass.length}`);
   const transporte = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user, pass } });
   await transporte.sendMail({
     from: `"${m.nombreRemitente.replace(/"/g, '')}" <${user}>`,

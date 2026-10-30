@@ -8,7 +8,7 @@ import { Product, Category, Movimiento } from '@/types';
 import { exportReport, formatMoney, type Column, type ExportSpec, type Format } from '@/lib/exportar';
 import {
   FileSpreadsheet, FileText, Package, AlertTriangle, Ban, ArrowLeftRight, ShoppingCart,
-  SlidersHorizontal, X, Loader2,
+  SlidersHorizontal, X, Loader2, Hourglass,
 } from 'lucide-react';
 
 /* ---------- Tipos ---------- */
@@ -40,6 +40,8 @@ type PedidoRow = {
 };
 
 type ProductItem = ProductRow & { categoria: string; proveedor: string };
+// Producto sin movimiento: fecha del último movimiento y días sin moverse
+type SinMovItem = ProductItem & { ultimo: string | null; dias: number | null };
 type MovItem = MovRow & { producto: string };
 
 type Source = 'productos' | 'movimientos' | 'pedidos';
@@ -248,6 +250,76 @@ async function loadPedidos(f: PedFilter): Promise<PedidoRow[]> {
   });
 }
 
+/* ---------- Productos sin movimiento ---------- */
+
+const MESES_SIN_MOV = [1, 3, 6, 12];
+
+const SINMOV_COLUMNS: Column<SinMovItem>[] = [
+  { key: 'sku', label: 'Código', get: (p) => p.sku ?? '' },
+  { key: 'nombre', label: 'Nombre', get: (p) => p.nombre },
+  { key: 'categoria', label: 'Categoría', get: (p) => p.categoria },
+  { key: 'proveedor', label: 'Proveedor', get: (p) => p.proveedor },
+  { key: 'stock', label: 'Stock', get: (p) => p.stock ?? 0, right: true },
+  {
+    key: 'valor',
+    label: 'Dinero detenido',
+    get: (p) => (p.precio ?? 0) * Math.max(p.stock ?? 0, 0),
+    right: true,
+    money: true,
+  },
+  { key: 'ultimo', label: 'Último movimiento', get: (p) => (p.ultimo ? formatDateTime(p.ultimo) : 'Nunca') },
+  { key: 'dias', label: 'Días sin movimiento', get: (p) => (p.dias === null ? 'Nunca' : p.dias), right: true },
+  { key: 'ubicacion', label: 'Ubicación', get: (p) => p.ubicacion ?? '' },
+];
+
+async function buildSinMovimiento(
+  f: ProdFilter,
+  meses: number,
+  categories: CategoryRow[],
+  proveedores: ProveedorRow[]
+): Promise<ExportSpec<SinMovItem>> {
+  const limite = new Date();
+  limite.setMonth(limite.getMonth() - meses);
+  const [prods, movs] = await Promise.all([
+    loadProducts({ ...f, deshabilitados: false }),
+    fetchAll<{ producto_id: string; created_at: string }>((a, b) =>
+      supabase.from('movimientos').select('producto_id, created_at').order('created_at').range(a, b)
+    ),
+  ]);
+  // Fecha del último movimiento de cada producto
+  const ultimo = new Map<string, string>();
+  for (const m of movs) {
+    const prev = ultimo.get(m.producto_id);
+    if (!prev || m.created_at > prev) ultimo.set(m.producto_id, m.created_at);
+  }
+  const hoy = Date.now();
+  const rows: SinMovItem[] = prods
+    .filter((p) => (p.stock ?? 0) > 0) // solo lo que está ocupando espacio
+    .map((p) => {
+      const u = ultimo.get(String(p.id)) ?? null;
+      return { ...p, ultimo: u, dias: u ? Math.floor((hoy - new Date(u).getTime()) / 86400000) : null };
+    })
+    .filter((p) => !p.ultimo || new Date(p.ultimo) < limite)
+    .sort((a, b) => (b.dias ?? Infinity) - (a.dias ?? Infinity) || a.nombre.localeCompare(b.nombre));
+
+  const unidades = rows.reduce((s, p) => s + Math.max(p.stock ?? 0, 0), 0);
+  const valor = rows.reduce((s, p) => s + (p.precio ?? 0) * Math.max(p.stock ?? 0, 0), 0);
+  return {
+    title: `Productos sin movimiento (${meses} ${meses === 1 ? 'mes' : 'meses'} o más)`,
+    file: 'productos_sin_movimiento',
+    columns: SINMOV_COLUMNS,
+    rows,
+    summary: [
+      ...prodFilterText(f, categories, proveedores),
+      `Sin entradas ni salidas desde: ${limite.toLocaleDateString('es-CR')}`,
+      `Productos: ${rows.length}`,
+      `Unidades: ${unidades}`,
+      `Dinero detenido: ${formatMoney(valor)}`,
+    ],
+    totals: { nombre: 'TOTAL', stock: unidades, valor },
+  };
+}
+
 /* ---------- Construcción de cada reporte ---------- */
 
 function categoryText(f: ProdFilter, categories: CategoryRow[]): string {
@@ -348,6 +420,8 @@ export default function ReportesPage() {
   const [outF, setOutF] = useState<ProdFilter>(EMPTY_PROD);
   const [movF, setMovF] = useState<MovFilter>(EMPTY_MOV);
   const [pedF, setPedF] = useState<PedFilter>(EMPTY_PED);
+  const [sinF, setSinF] = useState<ProdFilter>(EMPTY_PROD);
+  const [sinMeses, setSinMeses] = useState(3);
 
   const [source, setSource] = useState<Source>('productos');
   const [customCols, setCustomCols] = useState<Record<Source, string[]>>(ALL_KEYS);
@@ -500,6 +574,26 @@ export default function ReportesPage() {
             onExport={(fmt) => run(fmt, () => buildPedidos(pedF))}
           >
             <PedFilters value={pedF} onChange={setPedF} />
+          </ReportCard>
+
+          <ReportCard
+            icon={<Hourglass size={22} />}
+            color="amber"
+            title="Productos sin movimiento"
+            desc="Lo que no se ha vendido ni movido en un tiempo: dinero detenido en bodega, ideal para ofertas o dejar de comprar."
+            onExport={(fmt) => run(fmt, () => buildSinMovimiento(sinF, sinMeses, categories, proveedores))}
+          >
+            <div>
+              <label className={LABEL}>Sin movimiento desde hace</label>
+              <select className={FIELD} value={sinMeses} onChange={(e) => setSinMeses(Number(e.target.value))}>
+                {MESES_SIN_MOV.map((m) => (
+                  <option key={m} value={m}>
+                    {m} {m === 1 ? 'mes' : 'meses'} o más
+                  </option>
+                ))}
+              </select>
+            </div>
+            <ProductFilters value={sinF} onChange={setSinF} categories={categories} proveedores={proveedores} />
           </ReportCard>
         </div>
 

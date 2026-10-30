@@ -135,3 +135,294 @@
     background-image: var(--sidebar-gradient);
   }
 }
+
+/* =====================================================================
+   TEMÁTICAS DE TEMPORADA (se activan con <html data-tema="...">)
+   Cambian el color principal y los fondos; los estados (éxito, alerta,
+   peligro) se mantienen para que nada se malinterprete.
+   ===================================================================== */
+
+/* ---- Navidad: azul noche + rojo navideño ---- */
+:root[data-tema="navidad"],
+[data-tema="navidad"] .card-light {
+  --primary: #c62828;
+  --primary-dark: #a11d1d;
+  --primary-light: #ef5350;
+  --primary-soft: #fde8e8;
+  --primary-ink: #9b1c1c;
+}
+:root[data-tema="navidad"] {
+  --bg: #cfe0f8;
+  --bg-gradient: linear-gradient(160deg, #dde9fc 0%, #c9dcf8 55%, #b3ccf2 100%);
+  --sidebar-gradient: linear-gradient(180deg, #e8f0fd 0%, #d1e1f9 100%);
+  /* Barra superior y menús teñidos (las tarjetas siguen blancas) */
+  --surface: #eef4fe;
+  --surface-alt: #e2ecfc;
+  --border: #c6d7ef;
+}
+:root.dark[data-tema="navidad"] {
+  --surface: #0b1830;
+  --surface-alt: #0f2040;
+  --border: #1a2d50;
+  --border-strong: #26406b;
+  --primary: #e53935;
+  --primary-dark: #c62828;
+  --primary-light: #ef5350;
+  --primary-soft: #3a1214;
+  --primary-ink: #fca5a5;
+  --bg: #071226;
+  --bg-gradient: linear-gradient(160deg, #050d1d 0%, #0a1b38 55%, #10284f 100%);
+  --sidebar-gradient: linear-gradient(180deg, #0a1730 0%, #081428 60%, #0c1f3e 100%);
+}
+
+/* ---- Halloween: naranja calabaza + negro suave ---- */
+:root[data-tema="halloween"],
+[data-tema="halloween"] .card-light {
+  --primary: #ea580c;
+  --primary-dark: #c2410c;
+  --primary-light: #fb923c;
+  --primary-soft: #ffedd5;
+  --primary-ink: #9a3412;
+}
+:root[data-tema="halloween"] {
+  --bg: #fad9b8;
+  --bg-gradient: linear-gradient(160deg, #ffeedd 0%, #fad9b8 55%, #f2c08c 100%);
+  --sidebar-gradient: linear-gradient(180deg, #fff3e6 0%, #fadfc2 100%);
+  /* Barra superior y menús teñidos (las tarjetas siguen blancas) */
+  --surface: #fff6ec;
+  --surface-alt: #fcebd8;
+  --border: #ecd0ae;
+}
+:root.dark[data-tema="halloween"] {
+  --surface: #140d09;
+  --surface-alt: #1d130c;
+  --border: #33210f;
+  --border-strong: #4a3016;
+  --primary: #f97316;
+  --primary-dark: #ea580c;
+  --primary-light: #fb923c;
+  --primary-soft: #3a1d08;
+  --primary-ink: #fdba74;
+  --bg: #0d0907;
+  --bg-gradient: linear-gradient(160deg, #0a0706 0%, #1a0f08 55%, #2a1506 100%);
+  --sidebar-gradient: linear-gradient(180deg, #140c07 0%, #100a06 60%, #22120a 100%);
+}
+
+/* ---- Independencia: azul bandera + toques de rojo ---- */
+:root[data-tema="independencia"],
+[data-tema="independencia"] .card-light {
+  --primary: #1e40af;
+  --primary-dark: #1e3a8a;
+  --primary-light: #3b82f6;
+  --primary-soft: #e0e7ff;
+  --primary-ink: #1e3a8a;
+}
+:root[data-tema="independencia"] {
+  --bg: #d6e0fb;
+  --bg-gradient: linear-gradient(160deg, #e4ebfd 0%, #d3ddfa 55%, #f4d1da 100%);
+  --sidebar-gradient: linear-gradient(180deg, #edf1fe 0%, #d9e1fb 100%);
+  /* Barra superior y menús teñidos (las tarjetas siguen blancas) */
+  --surface: #f1f4fe;
+  --surface-alt: #e6ebfd;
+  --border: #cbd6f2;
+}
+:root.dark[data-tema="independencia"] {
+  --surface: #0c1229;
+  --surface-alt: #111a38;
+  --border: #1d2a55;
+  --border-strong: #2a3b70;
+  --primary: #3b5bdb;
+  --primary-dark: #2f4ac0;
+  --primary-light: #5c7cfa;
+  --primary-soft: #131d40;
+  --primary-ink: #a5b4fc;
+  --bg: #080c1d;
+  --bg-gradient: linear-gradient(160deg, #060a18 0%, #0c1330 55%, #1d0f1a 100%);
+  --sidebar-gradient: linear-gradient(180deg, #0b1128 0%, #090e22 60%, #1a0f1c 100%);
+}
+
+/* ---- Día del Amor y la Amistad: rosa coral ---- */
+:root[data-tema="amor"],
+[data-tema="amor"] .card-light {
+  --primary: #e11d48;
+  --primary-dark: #be123c;
+  --primary-light: #fb7185;
+  --primary-soft: #ffe4e6;
+  --primary-ink: #9f1239;
+}
+:root[data-tema="amor"] {
+  --bg: #ffd6e0;
+  --bg-gradient: linear-gradient(160deg, #ffe8ee 0%, #ffd6e0 55%, #fbc0d0 100%);
+  --sidebar-gradient: linear-gradient(180deg, #fff1f5 0%, #ffdbe5 100%);
+  /* Barra superior y menús teñidos (las tarjetas siguen blancas) */
+  --surface: #fff5f8;
+  --surface-alt: #ffe9ef;
+  --border: #f2cdd7;
+}
+:root.dark[data-tema="amor"] {
+  --surface: #1a0c11;
+  --surface-alt: #241017;
+  --border: #3d1722;
+  --border-strong: #5a2232;
+  --primary: #f43f5e;
+  --primary-dark: #e11d48;
+  --primary-light: #fb7185;
+  --primary-soft: #3b0d1a;
+  --primary-ink: #fda4af;
+  --bg: #12070b;
+  --bg-gradient: linear-gradient(160deg, #0e0508 0%, #1c0a11 55%, #2a0e1a 100%);
+  --sidebar-gradient: linear-gradient(180deg, #170a0f 0%, #12070b 60%, #230c15 100%);
+}
+
+/* ---- Día de la Madre: frambuesa suave + verde hoja ---- */
+:root[data-tema="madre"],
+[data-tema="madre"] .card-light {
+  --primary: #c2255c;
+  --primary-dark: #a61e4d;
+  --primary-light: #e64980;
+  --primary-soft: #fce7f0;
+  --primary-ink: #a61e4d;
+}
+:root[data-tema="madre"] {
+  --bg: #f8d8e7;
+  --bg-gradient: linear-gradient(160deg, #fdebf3 0%, #f8d8e7 55%, #dcefd8 100%);
+  --sidebar-gradient: linear-gradient(180deg, #fef3f8 0%, #f9dfeb 100%);
+  /* Barra superior y menús teñidos (las tarjetas siguen blancas) */
+  --surface: #fff7fb;
+  --surface-alt: #fceaf2;
+  --border: #efd0de;
+}
+:root.dark[data-tema="madre"] {
+  --surface: #170c12;
+  --surface-alt: #20101a;
+  --border: #381a2b;
+  --border-strong: #52243c;
+  --primary: #e64980;
+  --primary-dark: #c2255c;
+  --primary-light: #f06595;
+  --primary-soft: #3a0f24;
+  --primary-ink: #fcc2d7;
+  --bg: #10080c;
+  --bg-gradient: linear-gradient(160deg, #0c0609 0%, #1a0c14 55%, #0f1c12 100%);
+  --sidebar-gradient: linear-gradient(180deg, #150a10 0%, #10080c 60%, #1d0d17 100%);
+}
+
+/* ---- Semana Santa: morado + dorado ---- */
+:root[data-tema="semanasanta"],
+[data-tema="semanasanta"] .card-light {
+  --primary: #6d28d9;
+  --primary-dark: #5b21b6;
+  --primary-light: #8b5cf6;
+  --primary-soft: #ede9fe;
+  --primary-ink: #5b21b6;
+}
+:root[data-tema="semanasanta"] {
+  --bg: #ddd2ff;
+  --bg-gradient: linear-gradient(160deg, #ede7ff 0%, #ddd2ff 55%, #f7e5a3 100%);
+  --sidebar-gradient: linear-gradient(180deg, #f3efff 0%, #e1d8ff 100%);
+  /* Barra superior y menús teñidos (las tarjetas siguen blancas) */
+  --surface: #f6f3ff;
+  --surface-alt: #ece6ff;
+  --border: #d6cbf3;
+}
+:root.dark[data-tema="semanasanta"] {
+  --surface: #120d22;
+  --surface-alt: #18112e;
+  --border: #2b2050;
+  --border-strong: #3d2e6e;
+  --primary: #8b5cf6;
+  --primary-dark: #7c3aed;
+  --primary-light: #a78bfa;
+  --primary-soft: #241a4a;
+  --primary-ink: #fde68a;
+  --bg: #0b0816;
+  --bg-gradient: linear-gradient(160deg, #08060f 0%, #120c26 55%, #1f1a0b 100%);
+  --sidebar-gradient: linear-gradient(180deg, #0f0b1e 0%, #0b0816 60%, #1a1530 100%);
+}
+
+/* Halloween: "En web" en morado (el naranja chocaba con "Stock bajo") */
+[data-tema="halloween"] .badge-web {
+  background-color: #ede9fe;
+  color: #5b21b6;
+}
+
+/* Con temática, las tarjetas grandes llevan un borde y una sombra suave del color del tema
+   (se nota el cambio aunque las tarjetas sigan blancas) */
+[data-tema] .card-light.rounded-xl {
+  border-color: color-mix(in srgb, var(--primary) 22%, #e5e7eb);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 22px -10px color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+/* Luces borrosas del fondo: más visibles en modo claro */
+.tema-bokeh { opacity: 0.35; }
+:root:not(.dark) .tema-bokeh { opacity: 0.6; }
+
+/* Mensaje del Dashboard con un degradado del color del tema */
+.tema-mensaje {
+  background: linear-gradient(120deg, var(--primary-soft) 0%, var(--surface) 70%);
+}
+
+/* ---- Animaciones (suaves y lentas) ---- */
+@keyframes tema-caer {
+  0% { transform: translate3d(0, -10vh, 0) rotate(0deg); }
+  50% { transform: translate3d(18px, 50vh, 0) rotate(120deg); }
+  100% { transform: translate3d(-12px, 110vh, 0) rotate(240deg); }
+}
+@keyframes tema-parpadeo {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes tema-flotar {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(30px, -25px, 0); }
+}
+@keyframes tema-colgar {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(14px); }
+}
+@keyframes tema-asomar {
+  0%, 70%, 100% { transform: translateY(70%); }
+  80%, 92% { transform: translateY(8%); }
+}
+@keyframes tema-volar {
+  0% { transform: translate3d(-10vw, 0, 0); }
+  50% { transform: translate3d(50vw, -30px, 0); }
+  100% { transform: translate3d(110vw, 0, 0); }
+}
+@keyframes tema-mecer {
+  0%, 100% { transform: rotate(-5deg); }
+  50% { transform: rotate(5deg); }
+}
+@keyframes tema-subir {
+  0% { transform: translate3d(0, 0, 0) scale(0.9); opacity: 0; }
+  10% { opacity: 1; }
+  50% { transform: translate3d(-16px, -55vh, 0) scale(1); }
+  90% { opacity: 1; }
+  100% { transform: translate3d(14px, -112vh, 0) scale(1.05); opacity: 0; }
+}
+@keyframes tema-latir {
+  0%, 100% { transform: scale(1); }
+  12% { transform: scale(1.18); }
+  24% { transform: scale(1); }
+  36% { transform: scale(1.12); }
+  48% { transform: scale(1); }
+}
+@keyframes tema-girar {
+  to { transform: rotate(360deg); }
+}
+.tema-caer { animation: tema-caer linear infinite; }
+.tema-subir { animation: tema-subir linear infinite; }
+.tema-latir { animation: tema-latir 2.6s ease-in-out infinite; }
+.tema-girar { animation: tema-girar 120s linear infinite; }
+.tema-parpadeo { animation: tema-parpadeo 2.4s ease-in-out infinite; }
+.tema-flotar { animation: tema-flotar 22s ease-in-out infinite; }
+.tema-colgar { animation: tema-colgar 6s ease-in-out infinite; }
+.tema-asomar { animation: tema-asomar 14s ease-in-out infinite; }
+.tema-volar { animation: tema-volar linear infinite; }
+.tema-mecer { animation: tema-mecer 3.5s ease-in-out infinite; transform-origin: top center; }
+.tema-mecer.origin-bottom { transform-origin: bottom center; }
+
+/* Si la compu pide "reducir movimiento", los adornos quedan quietos */
+@media (prefers-reduced-motion: reduce) {
+  .tema-anim { animation: none !important; }
+}

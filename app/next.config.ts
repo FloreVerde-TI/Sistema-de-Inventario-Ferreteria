@@ -20,6 +20,9 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false, // no anunciar que el sitio usa Next.js
+  // Oculta el botón flotante de Next.js ("N · Insight") que aparece al programar en localhost.
+  // En Vercel (producción) nunca se muestra a los usuarios.
+  devIndicators: false,
   async headers() {
     return [{ source: "/:path*", headers: seguridad }];
   },

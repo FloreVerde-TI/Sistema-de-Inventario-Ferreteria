@@ -644,7 +644,8 @@ function DisabledBadge() {
 
 function WebBadge() {
   return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-primary-soft text-primary-ink">
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-primary-soft text-primary-ink badge-web">
+      {/* Cambia con la temática; en Halloween se ajusta en globals.css para no confundirse con Stock bajo */}
       <Globe size={10} />
       En web
     </span>
@@ -676,6 +677,26 @@ function ProductDetailModal({
   const [imgFailed, setImgFailed] = useState(false);
   const imageUrl = product.imagen_principal?.trim() ?? '';
   const showImage = imageUrl !== '' && !imgFailed;
+  // Historial de precios (últimos 10 cambios)
+  const [historial, setHistorial] = useState<
+    { id: string; precio_anterior: number | null; precio_nuevo: number | null; usuario: string | null; creado_en: string }[] | null
+  >(null);
+
+  useEffect(() => {
+    let activo = true;
+    supabase
+      .from('historial_precios')
+      .select('id, precio_anterior, precio_nuevo, usuario, creado_en')
+      .eq('producto_id', product.id)
+      .order('creado_en', { ascending: false })
+      .limit(10)
+      .then(({ data }) => {
+        if (activo) setHistorial(data ?? []);
+      });
+    return () => {
+      activo = false;
+    };
+  }, [product.id]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -754,6 +775,33 @@ function ProductDetailModal({
           </div>
           <div className="sm:col-span-3">
             <DetailItem label="URL de la imagen" value={imageUrl || '—'} />
+          </div>
+
+          <div className="sm:col-span-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-text-soft mb-1.5">Historial de precios</p>
+            {historial === null ? (
+              <p className="text-sm text-text-muted italic">Cargando…</p>
+            ) : historial.length === 0 ? (
+              <p className="text-sm text-text-muted">Sin cambios de precio registrados.</p>
+            ) : (
+              <ul className="border border-border rounded-lg divide-y divide-border text-sm max-h-48 overflow-y-auto">
+                {historial.map((h) => {
+                  const sube = (h.precio_nuevo ?? 0) > (h.precio_anterior ?? 0);
+                  return (
+                    <li key={h.id} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-text">
+                        {formatPrice(h.precio_anterior)} →{' '}
+                        <strong className={sube ? 'text-success' : 'text-danger'}>{formatPrice(h.precio_nuevo)}</strong>
+                      </span>
+                      <span className="text-xs text-text-muted">
+                        {h.usuario || '—'} ·{' '}
+                        {new Date(h.creado_en).toLocaleString('es-CR', { dateStyle: 'short', timeStyle: 'short' })}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         </div>
 

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ThemeToggle from '@/components/ThemeToggle';
+import { BotonTema, DecoracionTema, ProbarTemas } from '@/components/Tematica';
 
 // ---------------------------------------------------------------------
 // PERMISOS (los mismos nombres que en la tabla "roles" de Supabase)
@@ -261,6 +262,10 @@ function AdminShell({ children }: { children: React.ReactNode }) {
 
   return (
     <PerfilContext.Provider value={perfil}>
+      {/* Temática de temporada (colores y adornos) */}
+      <DecoracionTema />
+      {/* TEMPORAL: selector para probar las temáticas (solo Super Administrador) */}
+      {perfil.esSuper && <ProbarTemas />}
       <div className="flex min-h-screen font-sans text-text">
         {/* Sidebar */}
         <aside className="w-64 app-sidebar border-r border-border flex flex-col sticky top-0 h-screen">
@@ -348,7 +353,10 @@ function AdminShell({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-4">
               <BuscadorRapido />
 
-              <ThemeToggle />
+              <div className="flex items-center">
+                <BotonTema />
+                <ThemeToggle />
+              </div>
 
               <div className="flex items-center gap-3 pl-6 border-l border-border">
                 <div className="text-right hidden sm:block">

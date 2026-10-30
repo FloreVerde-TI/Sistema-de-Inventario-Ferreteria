@@ -4,7 +4,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { registrarActividad, etiquetaUsuario } from '@/lib/actividad';
 import SiPuede from '@/components/SiPuede';
-import { Search, X, MessageSquareText, Mail, Send, Loader2, Phone, CheckCircle2, Archive, RotateCcw, Eye, Info } from 'lucide-react';
+import { traerTodo } from '@/lib/paginar';
+import { exportReport, type Column, type Format } from '@/lib/exportar';
+import { Search, X, MessageSquareText, Mail, Send, Loader2, Phone, CheckCircle2, Archive, RotateCcw, Eye, Info, Download, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react';
 
 // =====================================================================
 // COTIZACIONES de la página web
@@ -65,6 +67,32 @@ function numeroWhatsApp(tel: string | null): string | null {
   if (d.length >= 10) return d;
   return null;
 }
+
+// Aplica los filtros de la pantalla a una consulta (se usa en la lista y al exportar)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function conFiltros(query: any, f: Filters) {
+  const conds: string[] = [];
+  if (f.estado === 'Nueva') conds.push(NUEVA_COND);
+  else if (f.estado !== 'all') query = query.ilike('estado', f.estado);
+  if (f.desde) query = query.gte('fecha', new Date(`${f.desde}T00:00:00`).toISOString());
+  if (f.hasta) query = query.lte('fecha', new Date(`${f.hasta}T23:59:59.999`).toISOString());
+  const term = f.search.trim().replace(/[,()%*]/g, ' ').trim();
+  if (term) conds.push(`or(nombre.ilike.%${term}%,correo.ilike.%${term}%,telefono.ilike.%${term}%,mensaje.ilike.%${term}%)`);
+  if (conds.length > 0) query = query.or(`and(${conds.join(',')})`);
+  return query;
+}
+
+const EXPORT_COLUMNS: Column<CotizacionRow>[] = [
+  { key: 'fecha', label: 'Fecha', get: (c) => formatDate(c.fecha) },
+  { key: 'nombre', label: 'Cliente', get: (c) => c.nombre ?? '' },
+  { key: 'correo', label: 'Correo', get: (c) => c.correo ?? '' },
+  { key: 'telefono', label: 'Teléfono', get: (c) => c.telefono ?? '' },
+  { key: 'mensaje', label: 'Mensaje', get: (c) => c.mensaje ?? '', maxChars: 140 },
+  { key: 'estado', label: 'Estado', get: (c) => normEstado(c.estado) },
+  { key: 'atendida', label: 'Atendida por', get: (c) => c.respondido_nombre ?? '' },
+  { key: 'atendida_en', label: 'Fecha atención', get: (c) => (c.respondido_en ? formatDate(c.respondido_en) : '') },
+  { key: 'respuesta', label: 'Respuesta', get: (c) => c.respuesta ?? '', maxChars: 140 },
+];
 
 export default function CotizacionesPage() {
   const [rows, setRows] = useState<CotizacionRow[]>([]);
@@ -132,17 +160,10 @@ export default function CotizacionesPage() {
     async function load() {
       if (!silencioso.current) setLoading(true);
       silencioso.current = false;
-      let query = supabase.from('cotizaciones').select(COLUMNS, { count: 'exact' }).order('fecha', { ascending: false });
-
-      const conds: string[] = [];
-      if (applied.estado === 'Nueva') conds.push(NUEVA_COND);
-      else if (applied.estado !== 'all') query = query.ilike('estado', applied.estado);
-      if (applied.desde) query = query.gte('fecha', new Date(`${applied.desde}T00:00:00`).toISOString());
-      if (applied.hasta) query = query.lte('fecha', new Date(`${applied.hasta}T23:59:59.999`).toISOString());
-
-      const term = applied.search.trim().replace(/[,()%*]/g, ' ').trim();
-      if (term) conds.push(`or(nombre.ilike.%${term}%,correo.ilike.%${term}%,telefono.ilike.%${term}%,mensaje.ilike.%${term}%)`);
-      if (conds.length > 0) query = query.or(`and(${conds.join(',')})`);
+      const query = conFiltros(
+        supabase.from('cotizaciones').select(COLUMNS, { count: 'exact' }).order('fecha', { ascending: false }),
+        applied
+      );
 
       const from = (page - 1) * PAGE_SIZE;
       const { data, count, error: err } = await query.range(from, from + PAGE_SIZE - 1);
@@ -161,6 +182,39 @@ export default function CotizacionesPage() {
     };
   }, [applied, page, refresco]);
 
+  // Exportar a Excel o PDF todas las cotizaciones que cumplen los filtros aplicados
+  const [menuExport, setMenuExport] = useState(false);
+  const [exportando, setExportando] = useState(false);
+  async function exportar(fmt: Format) {
+    setMenuExport(false);
+    setExportando(true);
+    setError(null);
+    try {
+      const { data, error: err } = await traerTodo<CotizacionRow>((a, b) =>
+        conFiltros(supabase.from('cotizaciones').select(COLUMNS).order('fecha', { ascending: false }).order('id'), applied).range(a, b)
+      );
+      if (err) throw new Error(err.message);
+      const filas = data ?? [];
+      if (filas.length === 0) {
+        setNotice('No hay cotizaciones con esos filtros para exportar.');
+        return;
+      }
+      const cuenta = (e: Estado) => filas.filter((c) => normEstado(c.estado) === e).length;
+      const resumen = [
+        applied.desde || applied.hasta ? `Rango: ${applied.desde || 'inicio'} a ${applied.hasta || 'hoy'}` : 'Rango: todas las fechas',
+        applied.estado !== 'all' ? `Estado: ${applied.estado}` : 'Todos los estados',
+        `Cotizaciones: ${filas.length} (${cuenta('Nueva')} nuevas, ${cuenta('Respondida')} respondidas, ${cuenta('Cerrada')} cerradas)`,
+      ];
+      if (applied.search.trim()) resumen.push(`Búsqueda: "${applied.search.trim()}"`);
+      await exportReport({ title: 'Cotizaciones web', file: 'cotizaciones', columns: EXPORT_COLUMNS, rows: filas, summary: resumen }, fmt);
+      setNotice(`Se exportaron ${filas.length} cotizaciones a ${fmt === 'excel' ? 'Excel' : 'PDF'}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo exportar.');
+    } finally {
+      setExportando(false);
+    }
+  }
+
   const setDraftField = <K extends keyof Filters>(key: K, value: Filters[K]) => setDraft((prev) => ({ ...prev, [key]: value }));
 
   function onCambio(c: CotizacionRow, msg: string) {
@@ -176,13 +230,40 @@ export default function CotizacionesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center">
-          <MessageSquareText size={20} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center">
+            <MessageSquareText size={20} />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-text tracking-tight">Cotizaciones web</h2>
+            <p className="text-text-muted text-sm">Consultas que dejan los clientes en el formulario de la página web</p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-2xl font-bold text-text tracking-tight">Cotizaciones web</h2>
-          <p className="text-text-muted text-sm">Consultas que dejan los clientes en el formulario de la página web</p>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setMenuExport((v) => !v)}
+            disabled={exportando}
+            className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2 disabled:opacity-50"
+          >
+            {exportando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Exportar <ChevronDown size={14} />
+          </button>
+          {menuExport && (
+            <div className="card-light absolute right-0 mt-2 w-48 bg-surface border border-border rounded-lg shadow-lg z-20 overflow-hidden">
+              <button type="button" onClick={() => exportar('excel')} className="w-full px-4 py-2.5 text-sm text-left text-text hover:bg-bg flex items-center gap-2">
+                <FileSpreadsheet size={16} /> Excel (.xlsx)
+              </button>
+              <button
+                type="button"
+                onClick={() => exportar('pdf')}
+                className="w-full px-4 py-2.5 text-sm text-left text-text hover:bg-bg flex items-center gap-2 border-t border-border"
+              >
+                <FileText size={16} /> PDF (.pdf)
+              </button>
+              <p className="px-4 py-2 text-[11px] text-text-muted border-t border-border">Usa los filtros aplicados</p>
+            </div>
+          )}
         </div>
       </div>
 

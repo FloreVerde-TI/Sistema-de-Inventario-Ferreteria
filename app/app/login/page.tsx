@@ -131,11 +131,20 @@ export default function LoginPage() {
     <div
       className="relative min-h-screen flex items-center justify-center p-6 overflow-hidden"
       // Degradado fijo con los colores de la marca (no cambia con el modo oscuro)
-      style={{ background: 'linear-gradient(135deg, #0f2e1a 0%, #1f7a3a 45%, #a8dbb4 100%)' }}
+      style={{
+        // Mitad verde (Flore Verde) y mitad roja (Ferre Fuerte), unidas por un brillo dorado
+        // para que no se ensucie el color donde se juntan
+        background: [
+          'radial-gradient(ellipse 45% 35% at 50% 50%, rgba(250, 204, 21, 0.28) 0%, transparent 70%)',
+          'radial-gradient(ellipse 60% 80% at 8% 30%, #2fa354 0%, transparent 65%)',
+          'radial-gradient(ellipse 60% 80% at 92% 70%, #e53935 0%, transparent 65%)',
+          'linear-gradient(110deg, #0c3a1d 0%, #1f7a3a 30%, #8a6d12 50%, #b3261e 70%, #4d0c0c 100%)',
+        ].join(', '),
+      }}
     >
       {/* Manchas difuminadas */}
-      <div className="pointer-events-none absolute -top-32 -left-32 w-[30rem] h-[30rem] rounded-full bg-[#2a8a45] opacity-40 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-40 -right-24 w-[34rem] h-[34rem] rounded-full bg-[#e3f4e7] opacity-50 blur-3xl" />
+      <div className="pointer-events-none absolute -top-32 -left-32 w-[30rem] h-[30rem] rounded-full bg-[#4caf50] opacity-30 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -right-24 w-[34rem] h-[34rem] rounded-full bg-[#ef5350] opacity-30 blur-3xl" />
 
       {/* Logo grande de fondo (marca de agua) */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -147,7 +156,7 @@ export default function LoginPage() {
       />
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/logo-icono.png"
+        src="/logo-ferrefuerte.png"
         alt=""
         aria-hidden
         className="pointer-events-none select-none absolute -right-16 -top-20 w-[26rem] opacity-[0.10] mix-blend-multiply rotate-12 blur-[2px]"
@@ -158,21 +167,26 @@ export default function LoginPage() {
           {/* Panel izquierdo: marca */}
           <div
             className="relative hidden md:flex flex-col justify-between p-12 text-white overflow-hidden"
-            style={{ background: 'linear-gradient(160deg, #1f7a3a 0%, #155c2b 55%, #0f2e1a 100%)' }}
+            style={{ background: 'linear-gradient(160deg, #1f7a3a 0%, #17402a 50%, #3a1414 100%)' }}
           >
             {/* Brillo suave */}
             <div className="pointer-events-none absolute -top-20 -right-20 w-80 h-80 rounded-full bg-[#6fbf73] opacity-30 blur-3xl" />
             <div className="pointer-events-none absolute -bottom-24 -left-16 w-72 h-72 rounded-full bg-[#a8dbb4] opacity-20 blur-3xl" />
 
             <div className="relative">
-              <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center overflow-hidden shadow-lg">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/logo-icono.png" alt="Flore Verde" className="w-full h-full object-contain p-1.5" />
+              {/* Las dos ferreterías: al entrar, cada quien ve la marca de la suya */}
+              <div className="flex items-center gap-3">
+                <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center overflow-hidden shadow-lg">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo-icono.png" alt="Flore Verde" className="w-full h-full object-contain p-1.5" />
+                </div>
+                <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center overflow-hidden shadow-lg">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo-ferrefuerte.png" alt="Ferre Fuerte" className="w-full h-full object-contain" />
+                </div>
               </div>
-              <h1 className="mt-8 text-4xl font-bold leading-tight">FerreStock</h1>
-              <p className="mt-2 text-white/80 text-lg">
-                El inventario de Flore Verde, en un solo lugar.
-              </p>
+              <h1 className="mt-8 text-4xl font-bold leading-tight">Sistema de Inventario</h1>
+              <p className="mt-2 text-white/80 text-lg">Flore Verde · Ferre Fuerte</p>
             </div>
 
             <ul className="relative space-y-4">
@@ -186,15 +200,21 @@ export default function LoginPage() {
               ))}
             </ul>
 
-            <p className="relative text-xs text-white/60">© 2026 Flore Verde SRL · Uso interno</p>
+            <p className="relative text-xs text-white/60">© 2026 · Uso interno</p>
           </div>
 
           {/* Panel derecho: formulario */}
           <div className="flex flex-col justify-center p-10 md:p-14">
             <div className="mb-8">
-              <div className="md:hidden w-24 h-24 mb-4 bg-white rounded-2xl flex items-center justify-center overflow-hidden shadow-md border border-border">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/logo.png" alt="Flore Verde" className="w-full h-full object-contain p-2" />
+              <div className="md:hidden flex gap-3 mb-4">
+                <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center overflow-hidden shadow-md border border-border">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.png" alt="Flore Verde" className="w-full h-full object-contain p-2" />
+                </div>
+                <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center overflow-hidden shadow-md">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo-ferrefuerte.png" alt="Ferre Fuerte" className="w-full h-full object-contain" />
+                </div>
               </div>
               <h2 className="text-3xl font-bold text-text">
                 {vista === 'login' ? 'Bienvenido' : 'Recuperar contraseña'}
@@ -223,7 +243,7 @@ export default function LoginPage() {
                       type="email"
                       autoComplete="email"
                       className={INPUT}
-                      placeholder="usuario@floreverde.com"
+                      placeholder="usuario@correo.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required

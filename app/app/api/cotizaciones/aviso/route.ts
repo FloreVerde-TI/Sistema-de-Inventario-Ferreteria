@@ -38,7 +38,7 @@ export async function POST(req: Request) {
     // Se lee de la base (no se confía en lo que trae el aviso)
     const { data: cot } = await db
       .from('cotizaciones')
-      .select('id, nombre, correo, telefono, mensaje, fecha')
+      .select('id, nombre, correo, telefono, mensaje, fecha, tienda_id')
       .eq('id', body.record.id)
       .maybeSingle();
     if (!cot) return NextResponse.json({ ok: true, ignorado: true });
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
     }
 
     const origen = new URL(req.url).origin;
-    const empresa = await cargarEmpresa(db, origen, process.env.SMTP_USER ?? '');
+    const empresa = await cargarEmpresa(db, origen, process.env.SMTP_USER ?? '', cot.tienda_id ?? undefined);
     const para = empresa.correo || process.env.SMTP_USER;
     if (!para) return NextResponse.json({ error: 'No hay correo de la empresa.' }, { status: 500 });
 

@@ -7,6 +7,7 @@ import { traerTodo } from '@/lib/paginar';
 import { Product, Movimiento } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
 import { VerDocumento } from '@/components/Documento';
+import { useDefensa, defensaActiva } from '@/lib/defensa';
 import { Search, Download, ChevronDown, FileSpreadsheet, FileText, X, Loader2 } from 'lucide-react';
 
 type ProductName = Pick<Product, 'id' | 'nombre'>;
@@ -54,6 +55,8 @@ function formatNumber(n: number): string {
 function movQuery(f: Filters, products: ProductName[], count: boolean) {
   let query = supabase.from('movimientos').select(FIELDS, count ? { count: 'exact' } : undefined);
 
+  // Modo defensa: sin los movimientos que vienen de la página web
+  if (defensaActiva()) query = query.or('origen.is.null,origen.neq.web');
   if (f.tipo !== 'all') query = query.eq('tipo', f.tipo);
   if (f.producto !== 'all') query = query.eq('producto_id', f.producto);
   if (f.desde) query = query.gte('created_at', new Date(`${f.desde}T00:00:00`).toISOString());
@@ -129,6 +132,7 @@ export default function MovimientosPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+  const defensa = useDefensa(); // modo defensa: oculta los movimientos de la web
 
   // Al salir de la pantalla, filtros, búsqueda y página vuelven a empezar
   useEffect(() => {
@@ -197,7 +201,7 @@ export default function MovimientosPage() {
     return () => {
       cancelled = true;
     };
-  }, [applied, page, products]);
+  }, [applied, page, products, defensa]);
 
   const setDraftField = <K extends keyof Filters>(key: K, value: Filters[K]) =>
     setDraft((prev) => ({ ...prev, [key]: value }));
@@ -231,7 +235,7 @@ export default function MovimientosPage() {
         {
           title: 'Historial de movimientos',
           file: 'historial_movimientos',
-          columns: EXPORT_COLUMNS,
+          columns: defensaActiva() ? EXPORT_COLUMNS.filter((c) => c.key !== 'origen') : EXPORT_COLUMNS,
           rows,
           summary: [
             ...filtersSummary(applied, products),
@@ -258,7 +262,7 @@ export default function MovimientosPage() {
     <AdminLayout>
       <div className="space-y-6">
         {/* Encabezado */}
-        <div className="flex items-end justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold text-text tracking-tight">Historial de movimientos</h2>
             <p className="text-text-muted text-sm">Auditoría completa de entradas y salidas del inventario</p>

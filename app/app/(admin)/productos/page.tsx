@@ -12,6 +12,7 @@ import SiPuede from '@/components/SiPuede';
 import ImportarProductos from '@/components/ImportarProductos';
 import { Product, Category } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
+import { useDefensa, defensaActiva } from '@/lib/defensa';
 import {
   Plus,
   Search,
@@ -106,7 +107,8 @@ async function fetchProductMovements(productId: ProductRow['id']): Promise<Movem
       .range(from, from + MOV_PAGE_SIZE - 1);
     if (error) throw new Error(error.message);
     const chunk = (data ?? []) as MovementRow[];
-    all.push(...chunk);
+    // Modo defensa: sin movimientos de la página web
+    all.push(...(defensaActiva() ? chunk.filter((m) => m.origen !== 'web') : chunk));
     if (chunk.length < MOV_PAGE_SIZE) break;
   }
   return all;
@@ -133,7 +135,7 @@ function exportMovements(product: ProductRow, rows: MovementRow[], format: Forma
     {
       title: `Historial de movimientos - ${product.nombre}`,
       file: `movimientos_${fileSafe(product.sku || product.nombre)}`,
-      columns: MOVEMENT_COLUMNS,
+      columns: defensaActiva() ? MOVEMENT_COLUMNS.filter((c) => c.key !== 'origen') : MOVEMENT_COLUMNS,
       rows,
       summary: [`Código: ${product.sku ?? '-'}`, `Stock actual: ${product.stock ?? 0}`, `Movimientos: ${rows.length}`],
     },
@@ -207,6 +209,7 @@ function ProductosContenido() {
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
   const [filterWeb, setFilterWeb] = useState<WebFilter>('all');
+  const defensa = useDefensa(); // modo defensa: sin nada de la página web
   const [verDeshabilitados, setVerDeshabilitados] = useState(false);
   const [importando, setImportando] = useState(false);
   const [recarga, setRecarga] = useState(0); // al cambiar, vuelve a cargar la lista
@@ -324,7 +327,7 @@ function ProductosContenido() {
         {
           title: 'Listado de productos',
           file: 'productos',
-          columns: PRODUCT_COLUMNS,
+          columns: defensa ? PRODUCT_COLUMNS.filter((c) => c.key !== 'web') : PRODUCT_COLUMNS,
           rows,
           summary: [`Productos: ${rows.length}`],
         },
@@ -352,14 +355,14 @@ function ProductosContenido() {
     <AdminLayout>
       <div className="space-y-6">
         {/* Encabezado */}
-        <div className="flex items-end justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold text-text tracking-tight">Gestión de productos</h2>
             <p className="text-text-muted text-sm">
               Administra el catálogo, stock y ubicaciones de la ferretería
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <div className="relative" ref={exportRef}>
               <button
                 type="button"
@@ -467,11 +470,13 @@ function ProductosContenido() {
             <option value="out">Agotado</option>
           </select>
 
-          <select className={FIELD} value={filterWeb} onChange={(e) => setFilterWeb(e.target.value as WebFilter)}>
-            <option value="all">Todos</option>
-            <option value="web">En Web</option>
-            <option value="noweb">No en Web</option>
-          </select>
+          {!defensa && (
+            <select className={FIELD} value={filterWeb} onChange={(e) => setFilterWeb(e.target.value as WebFilter)}>
+              <option value="all">Todos</option>
+              <option value="web">En Web</option>
+              <option value="noweb">No en Web</option>
+            </select>
+          )}
 
           <label className="flex items-center gap-2 text-sm text-text cursor-pointer whitespace-nowrap">
             <input
@@ -535,7 +540,7 @@ function ProductosContenido() {
                             ) : (
                               <>
                                 <StatusBadge status={getStatus(p.stock, p.stock_minimo)} />
-                                {p.activo && <WebBadge />}
+                                {p.activo && !defensa && <WebBadge />}
                               </>
                             )}
                           </div>
@@ -726,7 +731,7 @@ function ProductDetailModal({
               ) : (
                 <>
                   <StatusBadge status={getStatus(product.stock, product.stock_minimo)} />
-                  {product.activo && <WebBadge />}
+                  {product.activo && !defensaActiva() && <WebBadge />}
                 </>
               )}
             </div>
@@ -754,13 +759,13 @@ function ProductDetailModal({
             )}
           </div>
 
-          <div className="sm:col-span-2 grid grid-cols-2 gap-4">
+          <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <DetailItem label="Categoría" value={categoria} />
             <DetailItem label="Precio" value={formatPrice(product.precio)} />
             <DetailItem label="Código (SKU)" value={product.sku || '—'} />
             <DetailItem label="Código de barras" value={product.codigo_barras || '—'} />
             {codigosExtra.length > 0 && (
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <DetailItem label="Códigos adicionales" value={codigosExtra.join(', ')} />
               </div>
             )}
@@ -967,12 +972,13 @@ function DeleteProductModal({
 
         <div className="p-6 space-y-4">
           {enPedidos === null ? (
-            <p className="text-sm text-text-muted italic">Revisando si el producto tiene pedidos web...</p>
+            <p className="text-sm text-text-muted italic">Revisando si el producto tiene ventas registradas...</p>
           ) : conPedidos ? (
             <div className="bg-info-soft text-sky-900 border border-sky-200 rounded-lg p-3 text-sm">
-              Este producto aparece en <strong>{enPedidos}</strong> {enPedidos === 1 ? 'pedido web' : 'pedidos web'}, así que
+              Este producto aparece en <strong>{enPedidos}</strong>{' '}
+              {defensaActiva() ? (enPedidos === 1 ? 'venta registrada' : 'ventas registradas') : enPedidos === 1 ? 'pedido web' : 'pedidos web'}, así que
               no se puede borrar: se perdería el historial de esos pedidos. Puedes <strong>deshabilitarlo</strong>: deja de
-              usarse en Entradas, Salidas y la web, pero se conserva todo.
+              usarse en Entradas y Salidas{defensaActiva() ? '' : ' y la web'}, pero se conserva todo.
             </div>
           ) : (
             <p className="text-sm text-text-soft">
@@ -986,7 +992,7 @@ function DeleteProductModal({
 
           {blocked && (
             <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-3 text-sm">
-              No se puede borrar: este producto tiene pedidos web asociados. Puedes deshabilitarlo para que no se use
+              No se puede borrar: este producto tiene {defensaActiva() ? 'ventas registradas' : 'pedidos web asociados'}. Puedes deshabilitarlo para que no se use
               más.
             </div>
           )}
@@ -1030,7 +1036,7 @@ function DeleteProductModal({
           <div className={STEP}>
             <p className="text-sm font-semibold text-text mb-1">¿Prefieres conservarlo?</p>
             <p className="text-xs text-text-muted mb-3">
-              Deshabilitar lo oculta de la web y de Entradas y Salidas, pero guarda todo su historial.
+              Deshabilitar lo oculta {defensaActiva() ? '' : 'de la web y '}de Entradas y Salidas, pero guarda todo su historial.
             </p>
             <button
               type="button"

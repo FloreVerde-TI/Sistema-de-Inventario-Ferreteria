@@ -12,11 +12,19 @@ const SECRET_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 type RolFila = { nombre: string; nivel: number; es_super: boolean; permisos: string[] };
 type PerfilFila = { full_name: string; role: string; activo: boolean; roles: RolFila | null };
-type Quien = { id: string; etiqueta: string; nivel: number; esSuper: boolean; permisos: string[] };
+type Quien = {
+  id: string;
+  etiqueta: string;
+  nivel: number;
+  esSuper: boolean;
+  permisos: string[];
+  tiendaActual: string;
+  misTiendas: string[];
+};
 
 type Accion =
-  | { accion: 'crear'; nombre: string; email: string; password: string; rol: string }
-  | { accion: 'editar'; id: string; nombre: string; rol: string; password?: string }
+  | { accion: 'crear'; nombre: string; email: string; password: string; rol: string; tiendas?: string[] }
+  | { accion: 'editar'; id: string; nombre: string; rol: string; password?: string; tiendas?: string[] }
   | { accion: 'activar' | 'desactivar' | 'eliminar'; id: string };
 
 class ErrorUsuario extends Error {
@@ -53,12 +61,26 @@ async function quienLlama(db: SupabaseClient, req: Request): Promise<Quien> {
   const p = await leerPerfil(db, data.user.id);
   if (!p || !p.activo || !p.roles) throw new ErrorUsuario('Tu usuario no está activo.', 403);
 
+  // Ferretería actual y ferreterías a las que tiene acceso
+  const [{ data: actual }, { data: mias }, { data: principal }] = await Promise.all([
+    db.from('profiles').select('tienda_actual').eq('id', data.user.id).maybeSingle(),
+    db.from('usuario_tiendas').select('tienda_id').eq('user_id', data.user.id),
+    db.from('tiendas').select('id').eq('es_principal', true).maybeSingle(),
+  ]);
+  const misTiendas = ((mias ?? []) as { tienda_id: string }[]).map((m) => m.tienda_id);
+  const preferida = (actual as { tienda_actual: string | null } | null)?.tienda_actual ?? '';
+  const tiendaActual = misTiendas.includes(preferida)
+    ? preferida
+    : misTiendas[0] ?? (principal as { id: string } | null)?.id ?? '';
+
   const q: Quien = {
     id: data.user.id,
     etiqueta: `${p.full_name} — ${p.role}`,
     nivel: p.roles.nivel,
     esSuper: p.roles.es_super,
     permisos: p.roles.permisos,
+    tiendaActual,
+    misTiendas,
   };
   if (!q.esSuper && !q.permisos.includes('usuarios_gestionar')) {
     throw new ErrorUsuario('No tienes permiso para gestionar usuarios.', 403);
@@ -89,6 +111,37 @@ async function objetivo(db: SupabaseClient, q: Quien, id: string, permitirseASiM
   return p;
 }
 
+// Guarda a qué ferreterías entra un usuario.
+// Solo se pueden dar ferreterías propias (el Super Administrador, cualquiera).
+// Las que quien llama no gestiona se conservan tal cual.
+async function asignarTiendas(db: SupabaseClient, q: Quien, userId: string, pedidas: string[] | undefined) {
+  if (!pedidas) return;
+  const { data: todas } = await db.from('tiendas').select('id');
+  const existentes = new Set(((todas ?? []) as { id: string }[]).map((t) => t.id));
+  const gestiona = (id: string) => q.esSuper || q.misTiendas.includes(id);
+
+  const elegidas = [...new Set(pedidas)].filter((id) => existentes.has(id));
+  if (elegidas.some((id) => !gestiona(id))) throw new ErrorUsuario('No puedes dar acceso a una ferretería que no es tuya.', 403);
+
+  const { data: previas } = await db.from('usuario_tiendas').select('tienda_id').eq('user_id', userId);
+  const conservar = ((previas ?? []) as { tienda_id: string }[]).map((x) => x.tienda_id).filter((id) => !gestiona(id));
+  const finales = [...new Set([...conservar, ...elegidas])];
+  if (finales.length === 0) throw new ErrorUsuario('Marca al menos una ferretería.');
+
+  const { error: delErr } = await db.from('usuario_tiendas').delete().eq('user_id', userId);
+  if (delErr) throw new ErrorUsuario(delErr.message);
+  const { error: insErr } = await db.from('usuario_tiendas').insert(finales.map((tienda_id) => ({ user_id: userId, tienda_id })));
+  if (insErr) throw new ErrorUsuario(insErr.message);
+
+  // Si su ferretería actual ya no está entre las suyas, pasa a la primera
+  const { data: perfil } = await db.from('profiles').select('tienda_actual').eq('id', userId).maybeSingle();
+  const actual = (perfil as { tienda_actual: string | null } | null)?.tienda_actual;
+  if (!actual || !finales.includes(actual)) {
+    const nueva = finales.includes(q.tiendaActual) ? q.tiendaActual : finales[0];
+    await db.from('profiles').update({ tienda_actual: nueva }).eq('id', userId);
+  }
+}
+
 function validarPassword(p: string) {
   if (p.length < 8 || !/[A-Za-z]/.test(p) || !/\d/.test(p)) {
     throw new ErrorUsuario('La contraseña debe tener al menos 8 caracteres, con letras y números.');
@@ -103,6 +156,7 @@ async function bitacora(db: SupabaseClient, q: Quien, accion: string, id: string
     entidad: 'usuario',
     entidad_id: id,
     detalle,
+    tienda_id: q.tiendaActual || undefined, // la clave secreta no tiene "tienda actual": se indica aquí
   });
 }
 
@@ -148,6 +202,13 @@ export async function POST(req: Request) {
         if (perfilErr)
           throw new ErrorUsuario(`El usuario se creó, pero no se pudo asignar el rol (${perfilErr.message}). Edítalo con el lápiz.`);
 
+        // Ferreterías: las marcadas o, si no vienen, la actual de quien lo crea
+        try {
+          await asignarTiendas(db, q, data.user.id, body.tiendas?.length ? body.tiendas : [q.tiendaActual]);
+        } catch (e) {
+          throw new ErrorUsuario(`El usuario se creó, pero no se pudieron asignar sus ferreterías (${(e as Error).message}). Edítalo con el lápiz.`);
+        }
+
         await bitacora(db, q, 'crear', data.user.id, `Creó el usuario ${nombre} (${email}) como ${rol.nombre}`);
         return NextResponse.json({ ok: true });
       }
@@ -177,9 +238,12 @@ export async function POST(req: Request) {
         const { error } = await db.auth.admin.updateUserById(body.id, cambios);
         if (error) throw new ErrorUsuario(traducir(error.message));
 
+        await asignarTiendas(db, q, body.id, body.tiendas);
+
         const partes = [`Editó a ${nombre}`];
         if (rol && rol.nombre !== p.role) partes.push(`rol ${p.role} → ${rol.nombre}`);
         if (body.password) partes.push('cambió la contraseña');
+        if (body.tiendas) partes.push('revisó sus ferreterías');
         await bitacora(db, q, 'editar', body.id, partes.join(' · '));
         return NextResponse.json({ ok: true });
       }

@@ -9,7 +9,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'FerreStock — Sistema de Gestión de Inventario',
+  title: 'Sistema de Inventario',
   description: 'Gestión de inventario para ferretería',
 };
 

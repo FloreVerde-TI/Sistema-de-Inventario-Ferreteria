@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { registrarActividad } from '@/lib/actividad';
 import SiPuede from '@/components/SiPuede';
 import SubirImagen from '@/components/SubirImagen';
+import { useDefensa } from '@/lib/defensa';
 import CodigosAdicionales from '@/components/CodigosAdicionales';
 import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import { Product, Category } from '@/types';
@@ -113,6 +114,7 @@ function CloseButton({ onClick }: { onClick: () => void }) {
 
 function EditarProductoForm() {
   const { id } = useParams<{ id: string }>();
+  const defensa = useDefensa();
 
   const [form, setForm] = useState<FormState | null>(null);
   const [stock, setStock] = useState(0);
@@ -336,7 +338,7 @@ function EditarProductoForm() {
   }
 
   const header = (
-    <div className="flex items-end justify-between">
+    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
       <div>
         <h2 className="text-2xl font-bold text-text tracking-tight">Editar producto</h2>
         <p className="text-text-muted text-sm">Modifica los datos del artículo</p>
@@ -617,7 +619,7 @@ function EditarProductoForm() {
             </div>
 
             <div className={`${CARD} p-6 space-y-5`}>
-              <SectionTitle>Estado y publicación</SectionTitle>
+              <SectionTitle>{defensa ? 'Estado' : 'Estado y publicación'}</SectionTitle>
 
               {/* Solo quien puede deshabilitar ve este interruptor */}
               <SiPuede permiso="productos_deshabilitar">
@@ -636,12 +638,14 @@ function EditarProductoForm() {
                     <Power size={16} /> Producto habilitado
                   </span>
                   <span className="block text-xs text-text-muted mt-0.5">
-                    Si lo deshabilitas, no se podrá usar en Entradas, Salidas ni en la web.
+                    Si lo deshabilitas, no se podrá usar en Entradas{defensa ? ' ni Salidas' : ', Salidas ni en la web'}.
                   </span>
                 </span>
               </label>
               </SiPuede>
 
+              {/* Modo defensa: se oculta la publicación en la web */}
+              {!defensa && (
               <label className={`flex items-start gap-3 ${form.habilitado ? 'cursor-pointer' : 'opacity-50'}`}>
                 <input
                   type="checkbox"
@@ -659,6 +663,7 @@ function EditarProductoForm() {
                   </span>
                 </span>
               </label>
+              )}
             </div>
 
             <button

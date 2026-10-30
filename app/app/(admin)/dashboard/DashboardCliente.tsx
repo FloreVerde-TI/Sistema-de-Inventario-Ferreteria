@@ -5,6 +5,7 @@ import Link from 'next/link';
 import AdminLayout, { usePerfil, Permiso } from '@/components/AdminLayout';
 import { MensajeTema } from '@/components/Tematica';
 import TarjetaCotizaciones from '@/components/TarjetaCotizaciones';
+import { useDefensa } from '@/lib/defensa';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { Product } from '@/types';
@@ -250,6 +251,8 @@ export default function DashboardCliente() {
 function DashboardContent() {
   const { puede } = usePerfil();
   const veCotizaciones = puede('cotizaciones');
+  // Modo defensa: sin pedidos ni cotizaciones web
+  const defensa = useDefensa();
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
   const [slices, setSlices] = useState<CategorySlice[]>([]);
   const [snapLoading, setSnapLoading] = useState(true);
@@ -452,19 +455,21 @@ function DashboardContent() {
         )}
 
         {/* KPIs */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className={`grid grid-cols-1 md:grid-cols-3 gap-4 ${defensa ? 'lg:grid-cols-5' : 'lg:grid-cols-6'}`}>
           <KpiCard icon={<Package size={20} />} label="Total productos" hint="Actual" value={snap(snapshot.totalProducts)} color="blue" />
           <KpiCard icon={<AlertTriangle size={20} />} label="Stock bajo" hint="Actual" value={snap(snapshot.lowStock)} color="amber" />
           <KpiCard icon={<Ban size={20} />} label="Agotados" hint="Actual" value={snap(snapshot.outOfStock)} color="red" />
           <KpiCard icon={<ArrowDownCircle size={20} />} label="Entradas" hint={range.label} value={inRange(data.entries)} color="green" />
           <KpiCard icon={<ArrowUpCircle size={20} />} label="Salidas" hint={range.label} value={inRange(data.exits)} color="cyan" />
-          <KpiCard
-            icon={<ShoppingCart size={20} />}
-            label="Pedidos web"
-            hint={rangeLoading ? range.label : `${range.label} · ${data.pendientes} pendientes`}
-            value={inRange(data.pedidos)}
-            color="blue"
-          />
+          {!defensa && (
+            <KpiCard
+              icon={<ShoppingCart size={20} />}
+              label="Pedidos web"
+              hint={rangeLoading ? range.label : `${range.label} · ${data.pendientes} pendientes`}
+              value={inRange(data.pedidos)}
+              color="blue"
+            />
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -521,6 +526,7 @@ function DashboardContent() {
           </div>
         </div>
 
+        {!defensa && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Pedidos web */}
         <div className={`p-6 ${CARD} ${veCotizaciones ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
@@ -558,6 +564,7 @@ function DashboardContent() {
         {/* Cotizaciones nuevas (solo quien puede verlas) */}
         <TarjetaCotizaciones />
         </div>
+        )}
       </div>
     </AdminLayout>
   );

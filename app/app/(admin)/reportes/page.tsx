@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { Product, Category, Movimiento } from '@/types';
 import { exportReport, formatMoney, type Column, type ExportSpec, type Format } from '@/lib/exportar';
+import { useDefensa, defensaActiva } from '@/lib/defensa';
 import {
   FileSpreadsheet, FileText, Package, AlertTriangle, Ban, ArrowLeftRight, ShoppingCart,
   SlidersHorizontal, X, Loader2, Hourglass,
@@ -97,8 +98,11 @@ function normEstado(estado: string | null): 'Pendiente' | 'Aprobado' | 'Rechazad
   return 'Pendiente';
 }
 
+// Modo defensa: nunca se exportan columnas de la página web
+const SOLO_WEB = ['web', 'origen'];
 function pick<T>(cols: Column<T>[], keys: string[]): Column<T>[] {
-  return keys.map((k) => cols.find((c) => c.key === k)).filter((c): c is Column<T> => !!c);
+  const ks = defensaActiva() ? keys.filter((k) => !SOLO_WEB.includes(k)) : keys;
+  return ks.map((k) => cols.find((c) => c.key === k)).filter((c): c is Column<T> => !!c);
 }
 
 function rangeText(desde: string, hasta: string): string {
@@ -226,6 +230,7 @@ async function loadMovements(f: MovFilter): Promise<MovItem[]> {
     fetchAll<ProductName>((a, b) => supabase.from('productos').select('id, nombre').order('id').range(a, b)),
     fetchAll<MovRow>((a, b) => {
       let q = supabase.from('movimientos').select(MOV_FIELDS);
+      if (defensaActiva()) q = q.or('origen.is.null,origen.neq.web'); // modo defensa
       if (f.tipo !== 'all') q = q.eq('tipo', f.tipo);
       if (f.producto !== 'all') q = q.eq('producto_id', f.producto);
       if (f.desde) q = q.gte('created_at', dayStart(f.desde));
@@ -398,7 +403,7 @@ async function buildAgotados(f: ProdFilter, categories: CategoryRow[], proveedor
 
 async function buildMovimientos(f: MovFilter): Promise<ExportSpec<MovItem>> {
   const rows = await loadMovements(f);
-  return { title: 'Movimientos de inventario', file: 'movimientos', columns: MOV_COLUMNS, rows, summary: movSummary(rows, f) };
+  return { title: 'Movimientos de inventario', file: 'movimientos', columns: pick(MOV_COLUMNS, MOV_COLUMNS.map((c) => c.key)), rows, summary: movSummary(rows, f) };
 }
 
 async function buildPedidos(f: PedFilter): Promise<ExportSpec<PedidoRow>> {
@@ -409,6 +414,7 @@ async function buildPedidos(f: PedFilter): Promise<ExportSpec<PedidoRow>> {
 /* ---------- Página ---------- */
 
 export default function ReportesPage() {
+  const defensa = useDefensa(); // modo defensa: sin reportes de la página web
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [proveedores, setProveedores] = useState<ProveedorRow[]>([]);
   const [productNames, setProductNames] = useState<ProductName[]>([]);
@@ -503,8 +509,9 @@ export default function ReportesPage() {
     });
   }
 
-  const sourceColumns: { key: string; label: string }[] =
-    source === 'productos' ? PRODUCT_COLUMNS : source === 'movimientos' ? MOV_COLUMNS : PED_COLUMNS;
+  const sourceColumns: { key: string; label: string }[] = (
+    source === 'productos' ? PRODUCT_COLUMNS : source === 'movimientos' ? MOV_COLUMNS : PED_COLUMNS
+  ).filter((c) => !(defensa && SOLO_WEB.includes(c.key)));
 
   return (
     <AdminLayout>
@@ -566,15 +573,17 @@ export default function ReportesPage() {
             <MovFilters value={movF} onChange={setMovF} products={productNames} />
           </ReportCard>
 
-          <ReportCard
-            icon={<ShoppingCart size={22} />}
-            color="cyan"
-            title="Pedidos web"
-            desc="Pedidos por rango, con estado, quién los revisó y el total aprobado."
-            onExport={(fmt) => run(fmt, () => buildPedidos(pedF))}
-          >
-            <PedFilters value={pedF} onChange={setPedF} />
-          </ReportCard>
+          {!defensa && (
+            <ReportCard
+              icon={<ShoppingCart size={22} />}
+              color="cyan"
+              title="Pedidos web"
+              desc="Pedidos por rango, con estado, quién los revisó y el total aprobado."
+              onExport={(fmt) => run(fmt, () => buildPedidos(pedF))}
+            >
+              <PedFilters value={pedF} onChange={setPedF} />
+            </ReportCard>
+          )}
 
           <ReportCard
             icon={<Hourglass size={22} />}
@@ -610,7 +619,7 @@ export default function ReportesPage() {
               <div>
                 <label className={LABEL}>Fuente de datos</label>
                 <select className={FIELD} value={source} onChange={(e) => setSource(e.target.value as Source)}>
-                  {(Object.keys(SOURCE_LABEL) as Source[]).map((s) => (
+                  {(Object.keys(SOURCE_LABEL) as Source[]).filter((s) => !(defensa && s === 'pedidos')).map((s) => (
                     <option key={s} value={s}>
                       {SOURCE_LABEL[s]}
                     </option>

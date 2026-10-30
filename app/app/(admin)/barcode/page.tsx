@@ -275,7 +275,7 @@ export default function BarcodePage() {
     <AdminLayout>
       <div className="space-y-6">
         {/* Encabezado */}
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 gap-4">
           <div>
             <h2 className="text-2xl font-bold text-text tracking-tight">Consulta por código de barras</h2>
             <p className="text-text-muted text-sm">
@@ -441,7 +441,7 @@ export default function BarcodePage() {
                 Código: {product.sku || '—'} · Barras: {product.codigo_barras || '—'}
               </p>
 
-              <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
                 <Info label="Categoría" value={categoryName ?? 'Sin categoría'} />
                 <Info label="Ubicación" value={product.ubicacion || '—'} />
                 <Info

@@ -23,6 +23,8 @@ const nextConfig: NextConfig = {
   // Oculta el botón flotante de Next.js ("N · Insight") que aparece al programar en localhost.
   // En Vercel (producción) nunca se muestra a los usuarios.
   devIndicators: false,
+  // No crear el archivo AGENTS.md (instrucciones para asistentes de programación)
+  agentRules: false,
   async headers() {
     return [{ source: "/:path*", headers: seguridad }];
   },

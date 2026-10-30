@@ -2,6 +2,7 @@
 
 Sistema web de inventario para **Flore Verde SRL** (ferretería y materiales de construcción).
 Controla productos, stock, entradas y salidas, los pedidos y cotizaciones de la web promocional, y registra quién hizo cada cosa.
+Es **multi-tienda**: el mismo sistema maneja también **Ferre Fuerte**, con su inventario totalmente separado.
 
 > Proyecto de práctica profesional · Desarrollo de Software · Costa Rica
 
@@ -11,7 +12,8 @@ Controla productos, stock, entradas y salidas, los pedidos y cotizaciones de la 
 
 | Módulo | Qué hace |
 |---|---|
-| **Login** | Inicio de sesión con la marca de la empresa y recuperación de contraseña por correo (`/restablecer`). |
+| **Login** | Inicio de sesión con los logos de las dos ferreterías y recuperación de contraseña por correo (`/restablecer`). |
+| **Multi-tienda** | Flore Verde y Ferre Fuerte con inventarios, usuarios y configuración separados. Botón para cambiar de ferretería; cada una con su logo, colores e ícono de pestaña. |
 | **Dashboard** | Resumen: stock bajo, agotados, entradas, salidas, pedidos y cotizaciones por responder, con gráficos por rango de fechas. |
 | **Productos** | Crear, editar, deshabilitar y eliminar. Imagen (Storage, comprimida a WebP), proveedor, ubicación, marca "En web", **varios códigos de barras** e **historial de precios**. Se actualiza en tiempo real. |
 | **Actualizar precios** | Cambio masivo por categoría, proveedor o búsqueda (% o monto, con redondeo), con vista previa antes/después. |
@@ -23,12 +25,14 @@ Controla productos, stock, entradas y salidas, los pedidos y cotizaciones de la 
 | **Aviso por correo** | Cada cotización nueva llega al correo de la empresa con diseño y botones (abrir, responder, WhatsApp). |
 | **Código de barras** | Búsqueda con lector o con la cámara del celular, por código principal, código adicional o SKU. |
 | **Reportes** | Excel y PDF con el logo y los datos de la empresa: inventario, stock bajo, agotados, movimientos, pedidos, **productos sin movimiento** (dinero detenido) y reporte personalizado. |
-| **Usuarios** | Crear, editar, activar/desactivar y eliminar usuarios desde una ruta segura del servidor. |
+| **Usuarios** | Crear, editar, activar/desactivar y eliminar usuarios desde una ruta segura del servidor. Se marca a qué ferreterías entra cada uno (mismo rol en todas). |
 | **Roles y permisos** | Roles con nivel jerárquico y permisos editables. Antes de borrar un rol con usuarios, esos usuarios se pasan a otro rol. |
 | **Configuración** | Datos de la empresa (salen en reportes y correos), stock mínimo por defecto y **catálogos**: deshabilitar o borrar categorías y proveedores. |
 | **Bitácora** | Registro de quién creó, editó, borró, aprobó, rechazó o respondió cada cosa. |
 | **Buscador rápido** | `Ctrl + K` para encontrar un producto al instante (stock y ubicación). |
-| **Temáticas de temporada** | Colores y adornos animados según la fecha: Navidad, Halloween, Independencia, Día del Amor y la Amistad, Día de la Madre y Semana Santa. Cada usuario las apaga con el botón ✨. |
+| **Temáticas de temporada** | Colores y adornos animados según la fecha: Navidad, Halloween, Independencia, Día del Amor y la Amistad, Día de la Madre y Semana Santa. Cada usuario las apaga con el botón ✨. Fuera de temporada, cada ferretería tiene su animación suave (hojas o engranajes) y el botón ⏸ las pausa en computadoras lentas. |
+| **Modo presentación** | Muestra solo el inventario, sin nada de la web (atajo discreto, solo Super Administrador). Siempre activo en tiendas sin página web. |
+| **Versión celular** | Menú ☰ y pantallas adaptadas para usar el sistema desde el teléfono. |
 
 ### Roles predeterminados
 
@@ -84,9 +88,11 @@ app/
 │   ├── login/  restablecer/
 │   └── robots.ts                  # Que los buscadores no indexen el sistema
 ├── components/   # AdminLayout, Tematica, SiPuede, SubirImagen, Documento, ImportarProductos…
-├── lib/          # supabase, actividad, paginar, imagenes, documentos, exportar, correo, temas
+├── lib/          # supabase, actividad, paginar, imagenes, documentos, exportar, correo, temas, defensa
 ├── types/
 └── vendor/       # xlsx-0.20.3.tgz (SheetJS)
+
+supabase/         # Copia de respaldo de todos los scripts SQL, en orden (ver su README)
 ```
 
 ---
@@ -125,6 +131,7 @@ npm run build    # compilar (correrlo siempre antes de subir cambios)
 ## Base de datos (Supabase)
 
 Los scripts SQL se ejecutan en orden en el **SQL Editor**. Cada uno va dentro de `begin/commit` y trae una verificación al final.
+Todos están guardados en la carpeta [`supabase/`](supabase/).
 
 | # | Script | Contenido |
 |---|---|---|
@@ -145,11 +152,15 @@ Los scripts SQL se ejecutan en orden en el **SQL Editor**. Cada uno va dentro de
 | 15 | Límite de cotizaciones | Máximo 3 por persona (correo, teléfono o IP) cada 10 minutos |
 | 16 | Seguridad pedidos web | Rechaza pedidos duplicados y limita pedidos por conexión |
 | 17 | Historial de precios | Tabla `historial_precios` con trigger |
+| 18 | Multi-tienda | Tablas `tiendas` y `usuario_tiendas`, columna `tienda_id` en todas las tablas de datos, funciones `mi_tienda()` y `cambiar_tienda()`, políticas por tienda |
+| 19 | Datos de prueba Ferre Fuerte | Productos, categorías, proveedores y movimientos de ejemplo (trae el bloque para borrarlos) |
+| 20 | Arreglo web tiendas | Función `tienda_tiene_web()`: la web solo ve tiendas con página web |
 
 **Tablas principales:**
 - Inventario: `productos`, `codigos_barras`, `historial_precios`, `categorias`, `proveedores`, `movimientos`, `movements`
 - Web: `pedidos`, `detalle_pedido`, `cotizaciones`
-- Administración: `profiles`, `roles`, `settings`, `actividad`
+- Administración: `profiles`, `roles`, `settings` (una fila por tienda), `actividad`
+- Tiendas: `tiendas`, `usuario_tiendas`
 
 **Triggers clave** (funciones `SECURITY DEFINER`):
 - **Pedido web:** descuenta el stock y lo registra en `movimientos`; rechaza duplicados.
@@ -159,9 +170,12 @@ Los scripts SQL se ejecutan en orden en el **SQL Editor**. Cada uno va dentro de
 - **Cotizaciones:** ignoran duplicadas y limitan el spam.
 - **Bitácora:** completa el usuario como "Nombre — Rol".
 - **Usuario nuevo:** se le crea su perfil.
-- **Códigos de barras:** un mismo código no puede pertenecer a dos productos.
+- **Códigos de barras:** un mismo código no puede pertenecer a dos productos de la misma tienda.
+- **Tienda:** movimientos, códigos, historial, imágenes y detalle de pedido copian la tienda de su producto.
 
-**Web promocional (sin sesión):** crea pedidos solo con la función `crear_pedido_web` (precios tomados de la base) y cotizaciones nuevas. Puede ver productos publicados y categorías. Los clientes **no** crean cuenta.
+**Multi-tienda:** cada usuario solo ve y modifica los datos de su tienda actual (políticas RLS restrictivas). Lo que se crea queda en esa tienda automáticamente.
+
+**Web promocional (sin sesión):** crea pedidos solo con la función `crear_pedido_web` (precios tomados de la base) y cotizaciones nuevas. Puede ver productos publicados y categorías, solo de tiendas con página web (Flore Verde). Los clientes **no** crean cuenta.
 
 **Webhook:** Database → Webhooks → `aviso_cotizacion` (INSERT en `cotizaciones`) → `POST https://TU-DOMINIO/api/cotizaciones/aviso` con el encabezado `x-aviso-secreto`.
 

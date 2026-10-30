@@ -123,6 +123,43 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [perfil, setPerfil] = useState<PerfilSesion | null>(null);
+  // Cantidad de pedidos web pendientes (número rojo en el menú), en tiempo real
+  const [pendientes, setPendientes] = useState(0);
+
+  useEffect(() => {
+    if (!perfil) return;
+    let activo = true;
+    let espera: ReturnType<typeof setTimeout> | undefined;
+
+    async function contar() {
+      const { count } = await supabase
+        .from('pedidos')
+        .select('id', { count: 'exact', head: true })
+        .or('estado.is.null,estado.ilike.pendiente');
+      if (activo) setPendientes(count ?? 0);
+    }
+    contar();
+
+    const canal = supabase
+      .channel('pedidos-menu')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+        clearTimeout(espera);
+        espera = setTimeout(contar, 500);
+      })
+      .subscribe();
+
+    return () => {
+      activo = false;
+      clearTimeout(espera);
+      supabase.removeChannel(canal);
+    };
+  }, [perfil]);
+
+  // La pestaña del navegador también avisa: "(2) FerreStock"
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\)\s*/, '');
+    document.title = pendientes > 0 ? `(${pendientes}) ${base}` : base;
+  }, [pendientes, pathname]);
 
   useEffect(() => {
     let activo = true;
@@ -244,7 +281,15 @@ function AdminShell({ children }: { children: React.ReactNode }) {
                           }`}
                         >
                           <item.icon size={18} />
-                          {item.label}
+                          <span className="flex-1 text-left">{item.label}</span>
+                          {item.id === 'pedidos' && pendientes > 0 && (
+                            <span
+                              className="min-w-5 h-5 px-1.5 rounded-full bg-danger text-white text-[11px] font-bold flex items-center justify-center animate-pulse"
+                              title={`${pendientes} pedido(s) pendiente(s)`}
+                            >
+                              {pendientes > 99 ? '99+' : pendientes}
+                            </span>
+                          )}
                         </button>
                       );
                     })}

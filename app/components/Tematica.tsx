@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useSyncExternalStore } from 'react';
-import { Sparkles, X } from 'lucide-react';
+import { Pause, Play, Sparkles, X } from 'lucide-react';
 import {
   TEMAS,
   cambiarEncendido,
@@ -23,14 +23,69 @@ import {
 // - Si la compu tiene "reducir movimiento", las animaciones se detienen.
 // =====================================================================
 
+// ---- Pausar animaciones (para compus lentas). Se guarda en este navegador. ----
+const CLAVE_PAUSA = 'ferrestock_animaciones_pausa';
+const EVENTO_PAUSA = 'ferrestock-animaciones';
+function leerPausa(): boolean {
+  try {
+    return window.localStorage.getItem(CLAVE_PAUSA) === '1';
+  } catch {
+    return false;
+  }
+}
+function suscribirPausa(cb: () => void) {
+  window.addEventListener(EVENTO_PAUSA, cb);
+  window.addEventListener('storage', cb);
+  return () => {
+    window.removeEventListener(EVENTO_PAUSA, cb);
+    window.removeEventListener('storage', cb);
+  };
+}
+export function usePausaAnimacion() {
+  return useSyncExternalStore(suscribirPausa, leerPausa, () => false);
+}
+function cambiarPausa(pausa: boolean) {
+  try {
+    if (pausa) window.localStorage.setItem(CLAVE_PAUSA, '1');
+    else window.localStorage.removeItem(CLAVE_PAUSA);
+  } catch {
+    /* sin almacenamiento: dura solo esta sesión */
+  }
+  window.dispatchEvent(new Event(EVENTO_PAUSA));
+}
+
+/** Botón ⏸/▶ junto al ✨: congela o reanuda los adornos animados. */
+export function BotonPausaAnimacion() {
+  const pausa = usePausaAnimacion();
+  return (
+    <button
+      type="button"
+      onClick={() => cambiarPausa(!pausa)}
+      className={`p-2 transition-colors ${pausa ? 'text-text-muted hover:text-text' : 'text-text-muted hover:text-primary'}`}
+      title={pausa ? 'Animaciones en pausa (clic para reanudar)' : 'Pausar animaciones (útil en computadoras lentas)'}
+      aria-label={pausa ? 'Reanudar animaciones' : 'Pausar animaciones'}
+      aria-pressed={pausa}
+    >
+      {pausa ? <Play size={18} /> : <Pause size={18} />}
+    </button>
+  );
+}
+
 export function useTema() {
   const estado = useSyncExternalStore(suscribirTema, estadoTema, estadoTemaServidor);
   return interpretarEstado(estado);
 }
 
 /** Aplica el tema al <html> y dibuja los adornos. Va una sola vez en AdminLayout. */
-export function DecoracionTema() {
+export function DecoracionTema({ tienda }: { tienda?: string }) {
   const { tema } = useTema();
+  const pausa = usePausaAnimacion();
+
+  useEffect(() => {
+    const html = document.documentElement;
+    if (pausa) html.dataset.animPausa = '1';
+    else delete html.dataset.animPausa;
+  }, [pausa]);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -41,7 +96,15 @@ export function DecoracionTema() {
     };
   }, [tema]);
 
-  if (!tema) return null;
+  // Sin temática de temporada (o "Sin tema"): el adorno de siempre de cada ferretería
+  if (!tema) {
+    if (!tienda) return null;
+    return (
+      <div aria-hidden="true">
+        {tienda === 'ferrefuerte' ? <AmbienteFerreFuerte /> : <AmbienteFloreVerde />}
+      </div>
+    );
+  }
   return (
     <div aria-hidden="true">
       {tema.id === 'navidad' && <Navidad />}
@@ -87,7 +150,7 @@ export function BotonTema() {
 export function ProbarTemas() {
   const { prueba } = useTema();
   return (
-    <div className="fixed left-3 bottom-3 z-50 card-light bg-surface border border-border rounded-full shadow-md pl-3 pr-1 py-1 flex items-center gap-2 text-xs">
+    <div className="hidden md:flex fixed left-3 bottom-20 z-50 card-light bg-surface border border-border rounded-full shadow-md pl-3 pr-1 py-1 items-center gap-2 text-xs">
       <span className="font-semibold text-text-soft">🎨 Probar tema</span>
       <select
         className="bg-bg border border-border rounded-full px-2 py-1 text-xs text-text outline-none"
@@ -178,9 +241,9 @@ function BanderaCR() {
 const azar = (i: number, s: number) => ((Math.sin(i * 12.9898 + s * 78.233) * 43758.5453) % 1 + 1) % 1;
 
 /** Luces de colores de fondo, muy borrosas (efecto "bokeh"). */
-function Bokeh({ colores }: { colores: string[] }) {
+function Bokeh({ colores, suave = false }: { colores: string[]; suave?: boolean }) {
   return (
-    <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
+    <div className={`fixed inset-0 -z-10 pointer-events-none overflow-hidden ${suave ? 'opacity-50 dark:opacity-30' : ''}`}>
       {colores.map((c, i) => (
         <span
           key={i}
@@ -206,7 +269,7 @@ const CABLE = Array.from({ length: 8 }, (_, i) => `${i === 0 ? 'M0 4 ' : ''}Q ${
 /** Guirnalda que cuelga en la parte de arriba (luces o banderines). */
 function Guirnalda({ n, pieza }: { n: number; pieza: (i: number) => React.ReactNode }) {
   return (
-    <div className="fixed top-0 left-64 right-0 h-9 z-40 pointer-events-none overflow-hidden">
+    <div className="fixed top-0 left-0 md:left-64 right-0 h-9 z-40 pointer-events-none overflow-hidden">
       <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 36">
         <path
           d={CABLE}
@@ -230,6 +293,155 @@ function Guirnalda({ n, pieza }: { n: number; pieza: (i: number) => React.ReactN
         );
       })}
     </div>
+  );
+}
+
+/* ------------------- DE SIEMPRE: FLORE VERDE (naturaleza) ------------------- */
+
+function HojaSVG({ size, color }: { size: number; color: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24">
+      <path d="M12 2C6 6 3.5 12 6 21c5-1 10-4 11.5-9.5C18.6 7.4 15.5 4 12 2z" fill={color} />
+      <path d="M12 3.5c-1.2 5-2.6 10.5-5.6 17" fill="none" stroke="#ffffff" strokeOpacity="0.45" strokeWidth="1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function Brote({ alto }: { alto: number }) {
+  return (
+    <svg width={alto * 0.8} height={alto} viewBox="0 0 32 40" fill="none" strokeLinecap="round">
+      <path d="M16 40V18" stroke="#15803d" strokeWidth="2.2" />
+      <path d="M16 24C9 24 5 19 4 12c7 0 11 4 12 12z" fill="#22c55e" />
+      <path d="M16 19c1-7 5-12 12-12-1 7-5 11-12 12z" fill="#4ade80" />
+    </svg>
+  );
+}
+
+function AmbienteFloreVerde() {
+  const verdes = ['#16a34a', '#22c55e', '#4ade80', '#15803d', '#65a30d', '#84cc16'];
+  return (
+    <>
+      <Bokeh suave colores={['#bbf7d0', '#86efac', '#d9f99d', '#a7f3d0']} />
+
+      {/* Hojas que caen despacio, detrás de las tarjetas */}
+      <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden opacity-60 dark:opacity-40">
+        {Array.from({ length: 14 }, (_, i) => (
+          <span
+            key={i}
+            className="absolute -top-8 tema-anim tema-caer"
+            style={{
+              left: `${azar(i, 21) * 100}%`,
+              animationDuration: `${20 + azar(i, 22) * 18}s`,
+              animationDelay: `${-azar(i, 23) * 38}s`,
+            }}
+          >
+            <HojaSVG size={12 + Math.round(azar(i, 24) * 12)} color={verdes[i % verdes.length]} />
+          </span>
+        ))}
+      </div>
+
+      {/* Brotes que se mecen abajo */}
+      <div className="fixed bottom-0 left-0 md:left-64 right-0 h-16 -z-10 pointer-events-none overflow-hidden opacity-50 dark:opacity-35">
+        {Array.from({ length: 9 }, (_, i) => (
+          <span
+            key={i}
+            className="absolute bottom-0 tema-anim tema-mecer origin-bottom"
+            style={{ left: `${4 + i * 11 + azar(i, 25) * 5}%`, animationDelay: `${-azar(i, 26) * 3.5}s` }}
+          >
+            <Brote alto={26 + Math.round(azar(i, 27) * 22)} />
+          </span>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ------------------- DE SIEMPRE: FERRE FUERTE (herramientas) ------------------- */
+
+// Engranaje dibujado con 'dientes' dientes
+function engranaje(dientes: number) {
+  const pts: string[] = [];
+  for (let i = 0; i < dientes * 4; i++) {
+    const ang = (i / (dientes * 4)) * Math.PI * 2;
+    const radio = i % 4 < 2 ? 50 : 41;
+    pts.push(`${(50 + radio * Math.cos(ang)).toFixed(2)},${(50 + radio * Math.sin(ang)).toFixed(2)}`);
+  }
+  return `M${pts.join(' L')} Z`;
+}
+const ENGRANE_12 = engranaje(12);
+const ENGRANE_9 = engranaje(9);
+
+function EngraneSVG({ size, color, d }: { size: number; color: string; d: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100">
+      <path d={d} fill={color} />
+      <circle cx="50" cy="50" r="15" fill="var(--bg)" />
+    </svg>
+  );
+}
+
+function TuercaSVG({ size, color }: { size: number; color: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24">
+      <path d="M7 3h10l5 9-5 9H7l-5-9z" fill={color} />
+      <circle cx="12" cy="12" r="3.6" fill="var(--bg)" />
+    </svg>
+  );
+}
+
+function TornilloSVG({ size, color }: { size: number; color: string }) {
+  return (
+    <svg width={size * 0.5} height={size} viewBox="0 0 12 24" fill="none">
+      <rect x="1" y="0.5" width="10" height="4" rx="1" fill={color} />
+      <path d="M4 4.5h4v15L6 23l-2-3.5z" fill={color} />
+      <path d="M3.5 8l5-1.2M3.5 11l5-1.2M3.5 14l5-1.2M3.5 17l5-1.2" stroke="var(--bg)" strokeWidth="0.9" />
+    </svg>
+  );
+}
+
+function AmbienteFerreFuerte() {
+  const metales = ['#c62828', '#d4a017', '#9ca3af', '#b91c1c', '#ca8a04', '#6b7280'];
+  return (
+    <>
+      <Bokeh suave colores={['#fecaca', '#fde68a', '#fca5a5', '#fef3c7']} />
+
+      {/* Engranajes grandes que giran muy lento en las esquinas */}
+      <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden opacity-[0.12] dark:opacity-[0.09]">
+        <span className="absolute -right-24 -top-24 tema-anim tema-girar" style={{ animationDuration: '90s' }}>
+          <EngraneSVG size={320} color="#c62828" d={ENGRANE_12} />
+        </span>
+        <span
+          className="absolute right-40 top-36 tema-anim tema-girar"
+          style={{ animationDuration: '60s', animationDirection: 'reverse' }}
+        >
+          <EngraneSVG size={150} color="#d4a017" d={ENGRANE_9} />
+        </span>
+        <span className="absolute left-48 -bottom-28 tema-anim tema-girar" style={{ animationDuration: '110s' }}>
+          <EngraneSVG size={280} color="#6b7280" d={ENGRANE_12} />
+        </span>
+      </div>
+
+      {/* Tuercas y tornillos que caen despacio */}
+      <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden opacity-55 dark:opacity-40">
+        {Array.from({ length: 12 }, (_, i) => (
+          <span
+            key={i}
+            className="absolute -top-8 tema-anim tema-caer"
+            style={{
+              left: `${azar(i, 31) * 100}%`,
+              animationDuration: `${18 + azar(i, 32) * 16}s`,
+              animationDelay: `${-azar(i, 33) * 34}s`,
+            }}
+          >
+            {i % 2 === 0 ? (
+              <TuercaSVG size={11 + Math.round(azar(i, 34) * 9)} color={metales[i % metales.length]} />
+            ) : (
+              <TornilloSVG size={16 + Math.round(azar(i, 35) * 10)} color={metales[i % metales.length]} />
+            )}
+          </span>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -391,7 +603,7 @@ function Halloween() {
       </div>
 
       {/* Telaraña chica (esquina inferior izquierda del área de trabajo) */}
-      <div className="fixed left-64 bottom-0 z-30 pointer-events-none text-neutral-500/40 dark:text-neutral-300/25" style={{ transform: 'rotate(180deg) scaleX(-1)' }}>
+      <div className="fixed left-0 md:left-64 bottom-0 z-30 pointer-events-none text-neutral-500/40 dark:text-neutral-300/25" style={{ transform: 'rotate(180deg) scaleX(-1)' }}>
         <Telarana style={{ width: 80, height: 80 }} />
       </div>
 
@@ -652,7 +864,7 @@ function SemanaSanta() {
       <div className="fixed right-2 bottom-0 z-30 pointer-events-none tema-anim tema-mecer origin-bottom" style={{ opacity: 0.75 }}>
         <Palma />
       </div>
-      <div className="fixed left-64 bottom-0 z-30 pointer-events-none tema-anim tema-mecer origin-bottom" style={{ opacity: 0.55, animationDelay: '1.2s' }}>
+      <div className="fixed left-0 md:left-64 bottom-0 z-30 pointer-events-none tema-anim tema-mecer origin-bottom" style={{ opacity: 0.55, animationDelay: '1.2s' }}>
         <Palma espejo />
       </div>
     </>

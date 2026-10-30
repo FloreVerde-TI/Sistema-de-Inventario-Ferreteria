@@ -19,11 +19,15 @@ import {
   ShieldAlert,
   MapPin,
   Loader2,
+  ArrowLeftRight,
   MessageSquareText,
+  Menu,
+  X as Cerrar,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ThemeToggle from '@/components/ThemeToggle';
-import { BotonTema, DecoracionTema, ProbarTemas } from '@/components/Tematica';
+import { BotonPausaAnimacion, BotonTema, DecoracionTema, ProbarTemas } from '@/components/Tematica';
+import { useDefensa, useDefensaManual, alternarDefensa, marcarTiendaSinWeb } from '@/lib/defensa';
 
 // ---------------------------------------------------------------------
 // PERMISOS (los mismos nombres que en la tabla "roles" de Supabase)
@@ -44,6 +48,18 @@ export type Permiso =
   | 'config_editar'
   | 'bitacora_ver';
 
+/** Una ferretería del sistema (tabla "tiendas"). */
+export type Tienda = {
+  id: string;
+  slug: string;
+  nombre: string;
+  nombre_app: string;
+  logo: string;
+  color: string;
+  es_principal: boolean;
+  tiene_web: boolean;
+};
+
 export type PerfilSesion = {
   id: string;
   nombre: string;
@@ -53,6 +69,12 @@ export type PerfilSesion = {
   permisos: string[];
   /** "Nombre — Rol", para guardar en movimientos, pedidos, etc. */
   etiqueta: string;
+  /** Ferretería en la que está trabajando ahora */
+  tienda: Tienda;
+  /** Ferreterías a las que tiene acceso (si son 2, ve el botón para cambiar) */
+  tiendas: Tienda[];
+  /** Todas las ferreterías (solo las ve quien gestiona usuarios, para asignarlas) */
+  todasTiendas: Tienda[];
 };
 
 function tienePermiso(perfil: PerfilSesion | null, permiso: Permiso): boolean {
@@ -179,12 +201,61 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     };
   }, [perfil]);
 
+  // Modo defensa (universidad): oculta todo lo de la página web
+  const defensa = useDefensa();
+  const defensaManual = useDefensaManual();
+  const [avisoDefensa, setAvisoDefensa] = useState<string | null>(null);
+  const clicsVersion = useRef<number[]>([]);
+  // Menú lateral en celular (en compu siempre está visible)
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  // Se cierra con Escape o si la pantalla vuelve a ser de compu
+  useEffect(() => {
+    if (!menuAbierto) return;
+    const pc = window.matchMedia('(min-width: 768px)');
+    const cerrar = () => setMenuAbierto(false);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && cerrar();
+    const onCambio = (e: MediaQueryListEvent) => e.matches && cerrar();
+    window.addEventListener('keydown', onKey);
+    pc.addEventListener('change', onCambio);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      pc.removeEventListener('change', onCambio);
+    };
+  }, [menuAbierto]);
+
+  function cambiarDefensa() {
+    const activo = alternarDefensa();
+    setAvisoDefensa(activo ? 'Modo presentación activado' : 'Modo presentación desactivado');
+    // La página se recarga sola para que todas las listas se vuelvan a leer (no hace falta F5)
+    setTimeout(() => window.location.reload(), 900);
+  }
+
+  // Atajo discreto: Ctrl + Alt + D (solo Super Administrador)
+  useEffect(() => {
+    if (!perfil?.esSuper) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        cambiarDefensa();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [perfil?.esSuper]);
+
+  // Si está activo, las pantallas de la web no se pueden abrir ni por dirección
+  useEffect(() => {
+    if (defensa && (pathname.startsWith('/pedidos') || pathname.startsWith('/cotizaciones'))) {
+      router.replace('/dashboard');
+    }
+  }, [defensa, pathname, router]);
+
   // La pestaña del navegador también avisa: "(2) FerreStock"
   useEffect(() => {
-    const base = document.title.replace(/^\(\d+\)\s*/, '');
-    const avisos = pendientes + cotNuevas;
+    const base = perfil ? `${perfil.tienda.nombre_app} — Inventario` : document.title.replace(/^\(\d+\)\s*/, '');
+    const avisos = defensa ? 0 : pendientes + cotNuevas;
     document.title = avisos > 0 ? `(${avisos}) ${base}` : base;
-  }, [pendientes, cotNuevas, pathname]);
+  }, [pendientes, cotNuevas, pathname, defensa, perfil]);
 
   useEffect(() => {
     let activo = true;
@@ -212,6 +283,47 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // Ferretería actual y a cuáles tiene acceso
+      const [{ data: actualId }, { data: todas }, { data: mias }] = await Promise.all([
+        supabase.rpc('mi_tienda'),
+        supabase.from('tiendas').select('id, slug, nombre, nombre_app, logo, color, es_principal, tiene_web').order('es_principal', { ascending: false }).order('nombre'),
+        supabase.from('usuario_tiendas').select('tienda_id').eq('user_id', authUser.id),
+      ]);
+      if (!activo) return;
+      const todasTiendas = (todas ?? []) as Tienda[];
+      const idsMias = new Set(((mias ?? []) as { tienda_id: string }[]).map((m) => m.tienda_id));
+      const tiendas = todasTiendas.filter((t) => idsMias.has(t.id));
+      const tienda =
+        todasTiendas.find((t) => t.id === actualId) ??
+        tiendas[0] ??
+        todasTiendas[0] ?? {
+          id: '',
+          slug: 'floreverde',
+          nombre: 'Flore Verde',
+          nombre_app: 'FerreStock',
+          logo: '/logo-icono.png',
+          color: '#1f7a3a',
+          es_principal: true,
+          tiene_web: true,
+        };
+
+      // Colores de la tienda y, si no tiene web, se ocultan las pantallas de la web
+      document.documentElement.dataset.tienda = tienda.slug;
+      // Ícono de la pestaña del navegador: el logo de la ferretería actual
+      if (tienda.slug !== 'floreverde') {
+        const iconos = document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]');
+        if (iconos.length === 0) {
+          const nuevo = document.createElement('link');
+          nuevo.rel = 'icon';
+          document.head.appendChild(nuevo);
+        }
+        document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((l) => {
+          l.type = 'image/png';
+          l.href = tienda.logo;
+        });
+      }
+      marcarTiendaSinWeb(!tienda.tiene_web);
+
       setPerfil({
         id: authUser.id,
         nombre: fila.full_name,
@@ -220,6 +332,9 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         esSuper: fila.roles?.es_super ?? false,
         permisos: fila.roles?.permisos ?? [],
         etiqueta: `${fila.full_name} — ${fila.role}`,
+        tienda,
+        tiendas: tiendas.length > 0 ? tiendas : [tienda],
+        todasTiendas,
       });
     }
 
@@ -263,31 +378,56 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <PerfilContext.Provider value={perfil}>
       {/* Temática de temporada (colores y adornos) */}
-      <DecoracionTema />
+      <DecoracionTema tienda={perfil.tienda.slug} />
       {/* TEMPORAL: selector para probar las temáticas (solo Super Administrador) */}
-      {perfil.esSuper && <ProbarTemas />}
+      {perfil.esSuper && !defensaManual && <ProbarTemas />}
+      {avisoDefensa && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full bg-black/80 text-white text-xs shadow-lg">
+          {avisoDefensa}
+        </div>
+      )}
       <div className="flex min-h-screen font-sans text-text">
-        {/* Sidebar */}
-        <aside className="w-64 app-sidebar border-r border-border flex flex-col sticky top-0 h-screen">
+        {/* Fondo oscuro detrás del menú (solo celular) */}
+        {menuAbierto && (
+          <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setMenuAbierto(false)} aria-hidden="true" />
+        )}
+
+        {/* Sidebar: en celular se abre con el botón ☰ */}
+        <aside
+          className={`w-64 shrink-0 app-sidebar bg-surface border-r border-border flex-col h-screen md:flex md:sticky md:top-0 md:z-auto md:shadow-none ${
+            menuAbierto ? 'flex fixed inset-y-0 left-0 z-50 shadow-2xl' : 'hidden'
+          }`}
+        >
           <div className="p-6 border-b border-border flex items-center gap-3">
             {/* Fondo blanco para que el logo se vea igual en modo oscuro */}
             <div className="w-11 h-11 shrink-0 bg-white rounded-lg flex items-center justify-center overflow-hidden shadow-sm border border-border">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo-icono.png" alt="Flore Verde" className="w-full h-full object-contain" />
+              <img src={perfil.tienda.logo} alt={perfil.tienda.nombre} className="w-full h-full object-contain" />
             </div>
-            <div>
-              <h1 className="text-sm font-bold leading-none">FerreStock</h1>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-sm font-bold leading-none">{perfil.tienda.nombre_app}</h1>
               <span className="text-[10px] text-text-muted font-medium uppercase tracking-wider">
                 Gestión de Inventario
               </span>
             </div>
+            <button
+              type="button"
+              onClick={() => setMenuAbierto(false)}
+              className="md:hidden p-2 -mr-2 text-text-muted hover:text-text"
+              aria-label="Cerrar menú"
+            >
+              <Cerrar size={20} />
+            </button>
           </div>
 
           <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
             {SECTIONS.map((section) => {
               // Solo se muestran las opciones permitidas para el rol
               const items = NAV_ITEMS.filter(
-                (item) => item.section === section && (!item.permiso || tienePermiso(perfil, item.permiso))
+                (item) =>
+                  item.section === section &&
+                  (!item.permiso || tienePermiso(perfil, item.permiso)) &&
+                  !(defensa && (item.id === 'pedidos' || item.id === 'cotizaciones'))
               );
               if (items.length === 0) return null;
               return (
@@ -301,9 +441,12 @@ function AdminShell({ children }: { children: React.ReactNode }) {
                       return (
                         <button
                           key={item.id}
-                          onClick={() => router.push(`/${item.id}`)}
+                          onClick={() => {
+                            setMenuAbierto(false);
+                            router.push(`/${item.id}`);
+                          }}
                           aria-current={isActive ? 'page' : undefined}
-                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 lg:py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                             isActive
                               ? 'bg-primary-soft text-primary-ink shadow-sm'
                               : 'text-text-soft hover:bg-bg hover:text-text'
@@ -337,33 +480,61 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="p-4 border-t border-border text-center">
-            <span className="text-[11px] text-text-muted">v 2.4.1 · © 2026 FerreStock</span>
+            {/* 5 clics rápidos aquí = modo defensa (solo Super Administrador); no parece un botón */}
+            <span
+              className="text-[11px] text-text-muted select-none"
+              onClick={() => {
+                if (!perfil.esSuper) return;
+                const ahora = Date.now();
+                clicsVersion.current = [...clicsVersion.current.filter((t) => ahora - t < 2000), ahora];
+                if (clicsVersion.current.length >= 5) {
+                  clicsVersion.current = [];
+                  cambiarDefensa();
+                }
+              }}
+            >
+              v 2.4.1 · © 2026 {perfil.tienda.nombre_app}
+            </span>
           </div>
         </aside>
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Topbar */}
-          <header className="h-16 bg-surface border-b border-border px-8 flex items-center justify-between sticky top-0 z-10">
-            <div className="flex flex-col">
-              <h2 className="text-lg font-semibold text-text">{current?.label ?? 'Panel'}</h2>
-              <span className="text-xs text-text-muted">Inicio / {current?.label ?? 'General'}</span>
+          <header className="h-16 bg-surface border-b border-border px-3 sm:px-5 lg:px-8 flex items-center justify-between gap-2 sticky top-0 z-30">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={() => setMenuAbierto(true)}
+                className="md:hidden p-2 -ml-1 rounded-lg text-text-soft hover:bg-bg"
+                aria-label="Abrir menú"
+              >
+                <Menu size={22} />
+              </button>
+              <div className="flex flex-col min-w-0">
+                <h2 className="text-base lg:text-lg font-semibold text-text truncate">{current?.label ?? 'Panel'}</h2>
+                <span className="hidden sm:block text-xs text-text-muted truncate">Inicio / {current?.label ?? 'General'}</span>
+              </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1 sm:gap-2 lg:gap-4 shrink-0">
+              {perfil.tiendas.length > 1 && <CambiarTienda perfil={perfil} />}
               <BuscadorRapido />
 
               <div className="flex items-center">
+                <span className="hidden sm:contents">
+                  <BotonPausaAnimacion />
+                </span>
                 <BotonTema />
                 <ThemeToggle />
               </div>
 
-              <div className="flex items-center gap-3 pl-6 border-l border-border">
+              <div className="flex items-center gap-2 lg:gap-3 pl-2 lg:pl-6 border-l border-border">
                 <div className="text-right hidden sm:block">
                   <p className="text-sm font-semibold leading-none">{perfil.nombre}</p>
                   <p className="text-[11px] text-text-muted font-medium">{perfil.rol}</p>
                 </div>
-                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-primary to-primary-light text-white flex items-center justify-center text-xs font-bold shadow-sm">
+                <div className="hidden sm:flex w-9 h-9 rounded-full bg-gradient-to-tr from-primary to-primary-light text-white items-center justify-center text-xs font-bold shadow-sm">
                   {initials}
                 </div>
                 <button
@@ -378,7 +549,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           </header>
 
           {/* Page Content */}
-          <main className="p-8 overflow-auto">
+          <main className="p-3 sm:p-5 lg:p-8 overflow-x-hidden">
             {sinAcceso ? (
               <div className="card-light bg-surface border border-border rounded-xl shadow-sm max-w-lg mx-auto mt-16 p-10 text-center">
                 <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-danger-soft flex items-center justify-center">
@@ -501,7 +672,7 @@ function BuscadorRapido() {
   const mostrarLista = abierto && texto.trim().length >= 2;
 
   return (
-    <div className="relative hidden md:block" ref={cajaRef}>
+    <div className="relative hidden lg:block" ref={cajaRef}>
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" size={16} />
       <input
         ref={inputRef}
@@ -579,6 +750,82 @@ function BuscadorRapido() {
               </button>
             </>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/** Botón para cambiar de ferretería (solo si el usuario tiene acceso a más de una). */
+function CambiarTienda({ perfil }: { perfil: PerfilSesion }) {
+  const [abierto, setAbierto] = useState(false);
+  const [cambiando, setCambiando] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const caja = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function fuera(e: MouseEvent) {
+      if (caja.current && !caja.current.contains(e.target as Node)) setAbierto(false);
+    }
+    document.addEventListener('mousedown', fuera);
+    return () => document.removeEventListener('mousedown', fuera);
+  }, []);
+
+  async function cambiar(t: Tienda) {
+    if (t.id === perfil.tienda.id) return setAbierto(false);
+    setError(null);
+    setCambiando(t.id);
+    const { error: err } = await supabase.rpc('cambiar_tienda', { p_tienda: t.id });
+    if (err) {
+      setError(err.message);
+      setCambiando(null);
+      return;
+    }
+    // Recarga completa en el Panel: datos, logo y colores de la otra ferretería
+    window.location.assign('/dashboard');
+  }
+
+  return (
+    <div className="relative" ref={caja}>
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        className="flex items-center gap-2 pl-1.5 pr-2.5 py-1.5 rounded-lg border border-border bg-bg hover:bg-surface-alt transition-colors"
+        title="Cambiar de ferretería"
+      >
+        <span className="w-6 h-6 rounded-md bg-white border border-border overflow-hidden flex items-center justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={perfil.tienda.logo} alt="" className="w-full h-full object-contain" />
+        </span>
+        <span className="text-xs font-semibold text-text hidden lg:inline">{perfil.tienda.nombre}</span>
+        <ArrowLeftRight size={14} className="text-text-muted" />
+      </button>
+      {abierto && (
+        <div className="card-light absolute right-0 mt-2 w-64 bg-surface border border-border rounded-xl shadow-lg z-30 overflow-hidden">
+          <p className="px-4 pt-3 pb-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Cambiar de ferretería</p>
+          {perfil.tiendas.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              disabled={!!cambiando}
+              onClick={() => cambiar(t)}
+              className={`w-full px-4 py-2.5 flex items-center gap-3 text-left text-sm hover:bg-bg transition-colors ${
+                t.id === perfil.tienda.id ? 'bg-bg font-semibold' : ''
+              }`}
+            >
+              <span className="w-8 h-8 rounded-lg bg-white border border-border overflow-hidden flex items-center justify-center shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={t.logo} alt="" className="w-full h-full object-contain" />
+              </span>
+              <span className="flex-1">
+                <span className="block text-text">{t.nombre}</span>
+                <span className="block text-[11px] text-text-muted">{t.id === perfil.tienda.id ? 'Actual' : 'Cambiar a esta'}</span>
+              </span>
+              {cambiando === t.id && <Loader2 size={16} className="animate-spin text-text-muted" />}
+            </button>
+          ))}
+          {error && <p className="px-4 py-2 text-xs text-danger border-t border-border">{error}</p>}
         </div>
       )}
     </div>

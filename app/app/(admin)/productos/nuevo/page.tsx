@@ -7,6 +7,7 @@ import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { etiquetaUsuario, registrarActividad } from '@/lib/actividad';
 import SubirImagen from '@/components/SubirImagen';
+import { useDefensa } from '@/lib/defensa';
 import { Category } from '@/types';
 import { Save, X, Loader2, Package, Globe, CheckCircle2 } from 'lucide-react';
 
@@ -78,6 +79,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function NuevoProductoForm() {
   const codigoInicial = useSearchParams().get('codigo') ?? '';
 
+  const defensa = useDefensa();
   const [form, setForm] = useState<FormState>({ ...EMPTY_FORM, codigo_barras: codigoInicial });
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [proveedores, setProveedores] = useState<ProveedorRow[]>([]);
@@ -92,7 +94,7 @@ function NuevoProductoForm() {
     async function loadData() {
       const [catRes, cfgRes, provRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').eq('activa', true).order('nombre'),
-        supabase.from('settings').select('stock_minimo_defecto').eq('id', 1).maybeSingle(),
+        supabase.from('settings').select('stock_minimo_defecto').maybeSingle(), // la de la ferretería actual
         supabase.from('proveedores').select('id, nombre').eq('activo', true).order('nombre'),
       ]);
       setProveedores((provRes.data ?? []) as ProveedorRow[]);
@@ -283,7 +285,7 @@ function NuevoProductoForm() {
     <AdminLayout>
       <div className="space-y-6">
         {/* Encabezado */}
-        <div className="flex items-end justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold text-text tracking-tight">Nuevo producto</h2>
             <p className="text-text-muted text-sm">Registra un nuevo artículo en el catálogo</p>
@@ -551,6 +553,8 @@ function NuevoProductoForm() {
               )}
             </div>
 
+            {/* Modo defensa: se oculta la publicación en la web */}
+            {!defensa && (
             <div className={`${CARD} p-6`}>
               <SectionTitle>Publicación</SectionTitle>
               <label className="flex items-start gap-3 cursor-pointer">
@@ -570,6 +574,7 @@ function NuevoProductoForm() {
                 </span>
               </label>
             </div>
+            )}
 
             <button
               type="submit"

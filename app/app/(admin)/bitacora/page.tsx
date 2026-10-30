@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
+import { useDefensa, defensaActiva } from '@/lib/defensa';
 import { Search, Download, ChevronDown, FileSpreadsheet, FileText, X } from 'lucide-react';
 
 type Fila = {
@@ -74,6 +75,8 @@ function consulta(f: Filtros, conConteo: boolean) {
     .from('actividad')
     .select(COLUMNAS, conConteo ? { count: 'exact' } : undefined)
     .order('created_at', { ascending: false });
+  // Modo defensa: sin registros de pedidos ni cotizaciones de la web
+  if (defensaActiva()) q = q.not('entidad', 'in', '(pedido,cotizacion)');
   if (f.entidad !== 'all') q = q.eq('entidad', f.entidad);
   if (f.accion !== 'all') q = q.eq('accion', f.accion);
   if (f.desde) q = q.gte('created_at', new Date(`${f.desde}T00:00:00`).toISOString());
@@ -92,6 +95,7 @@ const COLUMNAS_EXPORT: Column<Fila>[] = [
 ];
 
 export default function BitacoraPage() {
+  const defensa = useDefensa();
   const [rows, setRows] = useState<Fila[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -141,7 +145,7 @@ export default function BitacoraPage() {
     return () => {
       cancelado = true;
     };
-  }, [applied, page]);
+  }, [applied, page, defensa]);
 
   const setCampo = <K extends keyof Filtros>(k: K, v: Filtros[K]) => setDraft((p) => ({ ...p, [k]: v }));
 
@@ -202,10 +206,10 @@ export default function BitacoraPage() {
   return (
     <AdminLayout>
       <div className="space-y-6">
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 gap-4">
           <div>
             <h2 className="text-2xl font-bold text-text tracking-tight">Bitácora de actividad</h2>
-            <p className="text-text-muted text-sm">Quién hizo qué y cuándo: productos, pedidos, usuarios y configuración</p>
+            <p className="text-text-muted text-sm">Quién hizo qué y cuándo: productos, {defensa ? '' : 'pedidos, '}usuarios y configuración</p>
           </div>
           <div className="relative" ref={exportRef}>
             <button
@@ -268,7 +272,9 @@ export default function BitacoraPage() {
           </div>
           <select className={FIELD} value={draft.entidad} onChange={(e) => setCampo('entidad', e.target.value)}>
             <option value="all">Todo</option>
-            {Object.entries(ENTIDADES).map(([k, v]) => (
+            {Object.entries(ENTIDADES)
+              .filter(([k]) => !(defensa && (k === 'pedido' || k === 'cotizacion')))
+              .map(([k, v]) => (
               <option key={k} value={k}>
                 {v}
               </option>

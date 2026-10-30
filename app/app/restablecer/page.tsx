@@ -153,13 +153,19 @@ export default function RestablecerPage() {
             className="flex items-center gap-4 px-10 py-7 text-white"
             style={{ background: 'linear-gradient(160deg, #1f7a3a 0%, #155c2b 55%, #0f2e1a 100%)' }}
           >
-            <div className="w-14 h-14 shrink-0 bg-white rounded-xl flex items-center justify-center overflow-hidden shadow">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo-icono.png" alt="Flore Verde" className="w-full h-full object-contain p-1" />
+            <div className="flex gap-2 shrink-0">
+              <div className="w-14 h-14 bg-white rounded-xl flex items-center justify-center overflow-hidden shadow">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/logo-icono.png" alt="Flore Verde" className="w-full h-full object-contain p-1" />
+              </div>
+              <div className="w-14 h-14 bg-black rounded-xl flex items-center justify-center overflow-hidden shadow">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/logo-ferrefuerte.png" alt="Ferre Fuerte" className="w-full h-full object-contain" />
+              </div>
             </div>
             <div>
-              <p className="text-xl font-bold leading-tight">FerreStock</p>
-              <p className="text-sm text-white/75">Flore Verde · Gestión de Inventario</p>
+              <p className="text-xl font-bold leading-tight">Sistema de Inventario</p>
+              <p className="text-sm text-white/75">Flore Verde · Ferre Fuerte</p>
             </div>
           </div>
 
@@ -287,7 +293,7 @@ export default function RestablecerPage() {
           </div>
         </div>
 
-        <p className="text-center text-xs text-white/80 mt-6">© 2026 Flore Verde SRL · Uso interno</p>
+        <p className="text-center text-xs text-white/80 mt-6">© 2026 · Uso interno</p>
       </div>
     </div>
   );

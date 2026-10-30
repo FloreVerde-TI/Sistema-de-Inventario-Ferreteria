@@ -37,14 +37,16 @@ export function enlaceWhatsApp(t: string, texto?: string): string {
 }
 
 /** Datos de la empresa desde Configuración (settings). */
-export async function cargarEmpresa(db: SupabaseClient, origen: string, correoRespaldo: string): Promise<Empresa> {
-  const { data: cfg } = await db
+export async function cargarEmpresa(db: SupabaseClient, origen: string, correoRespaldo: string, tiendaId?: string): Promise<Empresa> {
+  // Con la sesión del usuario la base ya filtra su ferretería; con la clave de servicio
+  // (aviso automático) hay que indicar de qué tienda es.
+  let consulta = db
     .from('settings')
-    .select('business_name, nombre_comercial, cedula_juridica, phone, whatsapp, email, address, horario, sitio_web, logo_url')
-    .eq('id', 1)
-    .maybeSingle();
+    .select('business_name, nombre_comercial, cedula_juridica, phone, whatsapp, email, address, horario, sitio_web, logo_url');
+  if (tiendaId) consulta = consulta.eq('tienda_id', tiendaId);
+  const { data: cfg } = await consulta.limit(1).maybeSingle();
   return {
-    nombre: cfg?.nombre_comercial || cfg?.business_name || 'Flore Verde',
+    nombre: cfg?.nombre_comercial || cfg?.business_name || 'Ferretería',
     razon: cfg?.business_name || '',
     cedula: cfg?.cedula_juridica || '',
     telefono: cfg?.phone || '',

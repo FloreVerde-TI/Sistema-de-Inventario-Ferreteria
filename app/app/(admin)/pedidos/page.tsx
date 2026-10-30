@@ -731,11 +731,11 @@ function PedidoModal({
           </div>
 
           {!pending && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <DetailItem label="Revisado por" value={pedido.revisado_nombre || '—'} />
               <DetailItem label="Fecha de revisión" value={formatDate(pedido.revisado_en)} />
               {estado === 'Rechazado' && (
-                <div className="col-span-2">
+                <div className="sm:col-span-2">
                   <DetailItem label="Motivo del rechazo" value={pedido.motivo_rechazo || '—'} />
                 </div>
               )}

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { registrarActividad } from '@/lib/actividad';
+import { defensaActiva } from '@/lib/defensa';
 import { X, Percent, Loader2, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
 
 // =====================================================================
@@ -212,7 +213,7 @@ export default function PreciosMasaPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-text tracking-tight">Actualizar precios</h2>
           <p className="text-text-muted text-sm">Cambia el precio de varios productos a la vez, viendo el resultado antes de aplicar</p>
@@ -381,7 +382,7 @@ export default function PreciosMasaPage() {
         {confirmando && (
           <div className="px-6 py-3 bg-warning-soft text-amber-800 text-sm flex items-center gap-2 border-b border-border">
             <AlertTriangle size={16} /> Se cambiará el precio de {aAplicar.length} producto(s) ({describirRegla(tipo, valor, redondeo)}).
-            Los cambios se ven al instante en la página web. Presiona otra vez para confirmar.
+            {defensaActiva() ? '' : 'Los cambios se ven al instante en la página web. '}Presiona otra vez para confirmar.
           </div>
         )}
         {negativos.length > 0 && (

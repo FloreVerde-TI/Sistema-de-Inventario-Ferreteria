@@ -4,6 +4,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
+import { defensaActiva } from '@/lib/defensa';
 import { etiquetaUsuario, registrarActividad } from '@/lib/actividad';
 import { X, Download, FileUp, Loader2, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet } from 'lucide-react';
 
@@ -218,8 +219,16 @@ function revisarFila(n: number, celdas: unknown[], mapa: Map<number, Campo>, ex:
 }
 
 function descargarPlantilla() {
-  const titulos = CAMPOS.map((c) => (c.obligatorio ? `${c.titulo} *` : c.titulo));
-  const ejemplo = ['Martillo de uña 16oz', 'MART-016', '7501234567890', 'Herramientas manuales', 'El Tornillo', 4500, 20, 5, 'Pasillo A, Estante 3', 'Mango de fibra', 'Sí', ''];
+  // Modo defensa: la plantilla no trae la columna "En web"
+  const sinWeb = defensaActiva();
+  const campos = CAMPOS.filter((c) => !(sinWeb && c.campo === 'web'));
+  const titulos = campos.map((c) => (c.obligatorio ? `${c.titulo} *` : c.titulo));
+  const ejemploCompleto: Record<string, string | number> = {
+    nombre: 'Martillo de uña 16oz', sku: 'MART-016', barras: '7501234567890', categoria: 'Herramientas manuales',
+    proveedor: 'El Tornillo', precio: 4500, stock: 20, minimo: 5, ubicacion: 'Pasillo A, Estante 3',
+    descripcion: 'Mango de fibra', web: 'Sí', imagen: '',
+  };
+  const ejemplo = campos.map((c) => ejemploCompleto[c.campo] ?? '');
   const hoja = XLSX.utils.aoa_to_sheet([titulos, ejemplo]);
   hoja['!cols'] = titulos.map((t) => ({ wch: Math.max(14, t.length + 2) }));
   const libro = XLSX.utils.book_new();
@@ -334,7 +343,7 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
         traerTodo<{ nombre: string; sku: string | null; codigo_barras: string | null }>((a, b) =>
           supabase.from('productos').select('nombre, sku, codigo_barras').order('id').range(a, b)
         ),
-        supabase.from('settings').select('stock_minimo_defecto').eq('id', 1).maybeSingle(),
+        supabase.from('settings').select('stock_minimo_defecto').maybeSingle(), // la de la ferretería actual
         supabase.from('categorias').select('nombre'),
         supabase.from('proveedores').select('nombre'),
         // Códigos de barras adicionales (también cuentan como existentes)
@@ -530,7 +539,7 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
                 </li>
                 <li>
                   Opcionales: Código (SKU), Código de barras, Categoría, Proveedor, Stock inicial, Stock mínimo, Ubicación,
-                  Descripción, En web (Sí/No) e Imagen (URL).
+                  Descripción, {defensaActiva() ? '' : 'En web (Sí/No) '}e Imagen (URL).
                 </li>
                 <li>Categorías y proveedores que no existan se crean solos. El stock inicial queda registrado en Movimientos.</li>
                 <li>Antes de guardar verás una vista previa. Los productos que ya existen no se duplican.</li>
@@ -628,7 +637,7 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
                 <Dato valor={resumen.unidades} texto="unidades de stock inicial (como Entradas en Movimientos)" />
                 <Dato valor={resumen.categoriasNuevas} texto="categorías nuevas" />
                 <Dato valor={resumen.proveedoresNuevos} texto="proveedores nuevos" />
-                <Dato valor={resumen.enWeb} texto="productos se publicarán en la web" />
+                {!defensaActiva() && <Dato valor={resumen.enWeb} texto="productos se publicarán en la web" />}
                 <Dato valor={conError} texto="filas con error que NO se importarán" peligro={conError > 0} />
               </ul>
               <label className="flex items-start gap-3 text-sm text-text cursor-pointer border border-border rounded-lg p-3">
@@ -732,9 +741,11 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
               <CheckCircle2 size={44} className="mx-auto text-success mb-3" />
               <p className="text-lg font-bold text-text">Importación terminada</p>
               <p className="text-sm text-text-soft mt-1">{resultado}</p>
-              <p className="text-xs text-text-muted mt-3">
-                Los productos con &quot;En web: No&quot; no aparecen en la página hasta que los publiques desde Editar producto.
-              </p>
+              {!defensaActiva() && (
+                <p className="text-xs text-text-muted mt-3">
+                  Los productos con &quot;En web: No&quot; no aparecen en la página hasta que los publiques desde Editar producto.
+                </p>
+              )}
             </div>
           )}
         </div>

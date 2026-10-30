@@ -23,7 +23,7 @@ export type ExportSpec<T> = {
   totals?: Record<string, Cell>; // fila final opcional (por key de columna)
 };
 
-const COMPANY_DEFAULT = 'Flore Verde SRL';
+const COMPANY_DEFAULT = 'Inventario';
 const LOGO_DEFAULT = '/logo.png';
 const LOGO_H = 16; // alto del logo en el PDF (mm)
 
@@ -34,8 +34,7 @@ async function loadEmpresa(): Promise<Empresa> {
   const { data } = await supabase
     .from('settings')
     .select('business_name, nombre_comercial, cedula_juridica, phone, email, address, pie_reportes, logo_url')
-    .eq('id', 1)
-    .maybeSingle();
+    .maybeSingle(); // la base devuelve solo la configuración de la ferretería actual
   const s = (data ?? {}) as Partial<Record<string, string | null>>;
   const datos = [
     s.business_name,

@@ -8,6 +8,7 @@ import { traerTodo } from '@/lib/paginar';
 import { etiquetaUsuario } from '@/lib/actividad';
 import { AdjuntarDocumento, VerDocumento } from '@/components/Documento';
 import { subirDocumento } from '@/lib/documentos';
+import { defensaActiva } from '@/lib/defensa';
 import { Product, Movimiento } from '@/types';
 import { Loader2, ArrowUpCircle, ScanLine } from 'lucide-react';
 
@@ -88,6 +89,8 @@ export default function SalidasPage() {
         .from('movimientos')
         .select('id, producto_id, cantidad, motivo, usuario, referencia, observaciones, documento_path, created_at')
         .eq('tipo', 'salida')
+        // Modo defensa: sin movimientos de la página web
+        .or(defensaActiva() ? 'origen.is.null,origen.neq.web' : 'id.not.is.null')
         .gte('created_at', since)
         .order('created_at', { ascending: false })
         .limit(50),
@@ -230,8 +233,8 @@ export default function SalidasPage() {
         <form onSubmit={handleSubmit} className={`${CARD} p-6`}>
           <h3 className="text-[15px] font-semibold text-text mb-4">Registrar nueva salida</h3>
 
-          <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-            <div className="col-span-2 flex flex-col gap-1.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+            <div className="sm:col-span-2 flex flex-col gap-1.5">
               <label className={LABEL}>
                 Producto <span className="text-danger">*</span>
               </label>
@@ -283,7 +286,7 @@ export default function SalidasPage() {
               </select>
             </div>
 
-            <div className="col-span-2 flex flex-col gap-1.5">
+            <div className="sm:col-span-2 flex flex-col gap-1.5">
               <label className={LABEL}>Documento de referencia</label>
               <input
                 placeholder="N° boleta o comprobante"
@@ -293,7 +296,7 @@ export default function SalidasPage() {
               />
             </div>
 
-            <div className="col-span-2 flex flex-col gap-1.5">
+            <div className="sm:col-span-2 flex flex-col gap-1.5">
               <label className={LABEL}>Observaciones (opcional)</label>
               <textarea
                 rows={2}
@@ -308,7 +311,7 @@ export default function SalidasPage() {
               </span>
             </div>
 
-            <div className="col-span-2 flex flex-col gap-1.5">
+            <div className="sm:col-span-2 flex flex-col gap-1.5">
               <label className={LABEL}>Foto de la factura o comprobante (opcional)</label>
               <AdjuntarDocumento archivo={documento} onChange={setDocumento} />
             </div>

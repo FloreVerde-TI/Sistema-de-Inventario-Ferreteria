@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import AdminLayout, { usePerfil, Permiso, PerfilSesion } from '@/components/AdminLayout';
+import AdminLayout, { usePerfil, Permiso, PerfilSesion, Tienda } from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { registrarActividad } from '@/lib/actividad';
+import { useDefensa, defensaActiva } from '@/lib/defensa';
 import {
   UserPlus,
   Edit,
@@ -22,7 +23,7 @@ import {
 // ---------------------------------------------------------------------
 // Tipos y constantes
 // ---------------------------------------------------------------------
-type Usuario = { id: string; full_name: string; email: string; role: string; activo: boolean };
+type Usuario = { id: string; full_name: string; email: string; role: string; activo: boolean; tiendas: string[] };
 type Rol = {
   id: string;
   nombre: string;
@@ -36,8 +37,8 @@ type Tab = 'usuarios' | 'roles';
 type Aviso = { tipo: 'error' | 'exito'; texto: string } | null;
 
 type AccionApi =
-  | { accion: 'crear'; nombre: string; email: string; password: string; rol: string }
-  | { accion: 'editar'; id: string; nombre: string; rol: string; password?: string }
+  | { accion: 'crear'; nombre: string; email: string; password: string; rol: string; tiendas: string[] }
+  | { accion: 'editar'; id: string; nombre: string; rol: string; password?: string; tiendas?: string[] }
   | { accion: 'activar' | 'desactivar' | 'eliminar'; id: string };
 
 const GRUPOS_PERMISOS: { grupo: string; items: { key: Permiso; label: string }[] }[] = [
@@ -156,19 +157,31 @@ function UsuariosContenido() {
   const [rolEditando, setRolEditando] = useState<Rol | 'nuevo' | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
 
+  const tiendaActual = perfil?.tienda.id;
+
   const cargar = useCallback(async () => {
-    const [uRes, rRes] = await Promise.all([
+    const [uRes, rRes, tRes] = await Promise.all([
       supabase.from('profiles').select('id, full_name, email, role, activo').order('full_name'),
       supabase.from('roles').select('id, nombre, descripcion, nivel, es_super, es_sistema, permisos').order('nivel', { ascending: false }),
+      supabase.from('usuario_tiendas').select('user_id, tienda_id'),
     ]);
     const fallo = uRes.error ?? rRes.error;
     if (fallo) setAviso({ tipo: 'error', texto: `No se pudieron cargar los datos: ${fallo.message}` });
     else {
-      setUsuarios((uRes.data ?? []) as Usuario[]);
+      // Ferreterías de cada usuario; solo se listan los que tienen acceso a la ferretería actual
+      const acceso = new Map<string, string[]>();
+      for (const f of (tRes.data ?? []) as { user_id: string; tienda_id: string }[]) {
+        acceso.set(f.user_id, [...(acceso.get(f.user_id) ?? []), f.tienda_id]);
+      }
+      setUsuarios(
+        ((uRes.data ?? []) as Omit<Usuario, 'tiendas'>[])
+          .map((u) => ({ ...u, tiendas: acceso.get(u.id) ?? [] }))
+          .filter((u) => !tiendaActual || u.tiendas.length === 0 || u.tiendas.includes(tiendaActual))
+      );
       setRoles((rRes.data ?? []) as Rol[]);
     }
     setLoading(false);
-  }, []);
+  }, [tiendaActual]);
 
   useEffect(() => {
     cargar();
@@ -185,6 +198,10 @@ function UsuariosContenido() {
 
   // Roles que este usuario puede asignar
   const rolesAsignables = roles.filter((r) => perfil.esSuper || (!r.es_super && r.nivel <= perfil.nivel));
+  // Ferreterías que este usuario puede dar: el Super Admin todas; los demás, solo las suyas
+  const tiendasAsignables = perfil.esSuper ? perfil.todasTiendas : perfil.tiendas;
+  const nombreTienda = new Map(perfil.todasTiendas.map((t) => [t.id, t.nombre]));
+  const verTiendas = perfil.todasTiendas.length > 1;
 
   async function cambiarEstado(u: Usuario) {
     setAviso(null);
@@ -202,7 +219,7 @@ function UsuariosContenido() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 gap-4">
         <div>
           <h2 className="text-2xl font-bold text-text tracking-tight">Gestión de usuarios</h2>
           <p className="text-text-muted text-sm">Administra los accesos al sistema, los roles y sus permisos</p>
@@ -307,6 +324,15 @@ function UsuariosContenido() {
                           >
                             {u.role}
                           </span>
+                          {verTiendas && u.tiendas.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {u.tiendas.map((t) => (
+                                <span key={t} className="px-2 py-0.5 rounded border border-border text-[10px] text-text-soft">
+                                  {nombreTienda.get(t) ?? 'Otra'}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className={TD}>
                           {u.activo ? (
@@ -407,6 +433,8 @@ function UsuariosContenido() {
       {creando && (
         <UsuarioModal
           roles={rolesAsignables}
+          tiendas={tiendasAsignables}
+          tiendaActual={perfil.tienda.id}
           onClose={() => setCreando(false)}
           onGuardado={async (msg) => {
             setCreando(false);
@@ -421,6 +449,8 @@ function UsuariosContenido() {
           usuario={editando}
           esYo={editando.id === perfil.id}
           roles={rolesAsignables}
+          tiendas={tiendasAsignables}
+          tiendaActual={perfil.tienda.id}
           onClose={() => setEditando(null)}
           onGuardado={async (msg) => {
             setEditando(null);
@@ -497,12 +527,16 @@ function UsuarioModal({
   usuario,
   esYo = false,
   roles,
+  tiendas,
+  tiendaActual,
   onClose,
   onGuardado,
 }: {
   usuario?: Usuario;
   esYo?: boolean;
   roles: Rol[];
+  tiendas: Tienda[];
+  tiendaActual: string;
   onClose: () => void;
   onGuardado: (msg: string) => void;
 }) {
@@ -510,6 +544,7 @@ function UsuarioModal({
   const [nombre, setNombre] = useState(usuario?.full_name ?? '');
   const [email, setEmail] = useState(usuario?.email ?? '');
   const [rol, setRol] = useState(usuario?.role ?? roles.find((r) => r.nombre === 'Empleado')?.nombre ?? roles[roles.length - 1]?.nombre ?? '');
+  const [marcadas, setMarcadas] = useState<string[]>(usuario?.tiendas ?? [tiendaActual]);
   const [password, setPassword] = useState('');
   const [verPass, setVerPass] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -524,16 +559,19 @@ function UsuarioModal({
     if (!nombre.trim()) return setError('Escribe el nombre.');
     if (!editando && !email.trim()) return setError('Escribe el correo.');
     if (!rol) return setError('Elige un rol.');
+    // Solo cuentan las ferreterías que este usuario puede dar (las demás no se tocan)
+    const elegidas = marcadas.filter((id) => tiendas.some((t) => t.id === id));
+    if (tiendas.length > 1 && elegidas.length === 0) return setError('Marca al menos una ferretería.');
     if ((!editando || password) && !passwordValida(password)) {
       return setError('La contraseña debe tener al menos 8 caracteres, con letras y números.');
     }
     setGuardando(true);
     try {
       if (editando && usuario) {
-        await llamarApi({ accion: 'editar', id: usuario.id, nombre: nombre.trim(), rol, password: password || undefined });
+        await llamarApi({ accion: 'editar', id: usuario.id, nombre: nombre.trim(), rol, password: password || undefined, tiendas: elegidas });
         onGuardado(`Se actualizó a ${nombre.trim()}.`);
       } else {
-        await llamarApi({ accion: 'crear', nombre: nombre.trim(), email: email.trim(), password, rol });
+        await llamarApi({ accion: 'crear', nombre: nombre.trim(), email: email.trim(), password, rol, tiendas: elegidas.length > 0 ? elegidas : [tiendaActual] });
         onGuardado(`Se creó el usuario ${nombre.trim()}. Ya puede iniciar sesión con su correo y la contraseña asignada.`);
       }
     } catch (err) {
@@ -574,6 +612,36 @@ function UsuarioModal({
           </select>
           {esYo && <p className="text-xs text-text-muted mt-1">No puedes cambiar tu propio rol.</p>}
         </div>
+        {tiendas.length > 1 && (
+          <div>
+            <label className={LABEL}>Ferreterías a las que entra *</label>
+            <div className="flex flex-wrap gap-2">
+              {tiendas.map((t) => {
+                const activa = marcadas.includes(t.id);
+                return (
+                  <label
+                    key={t.id}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm transition-colors ${
+                      activa ? 'border-primary bg-primary-soft text-primary-ink' : 'border-border text-text-soft hover:bg-surface-alt'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="accent-[var(--primary)]"
+                      checked={activa}
+                      onChange={() =>
+                        setMarcadas((m) => (activa ? m.filter((x) => x !== t.id) : [...m, t.id]))
+                      }
+                    />
+                    <img src={t.logo} alt="" className="w-5 h-5 object-contain" />
+                    {t.nombre}
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-xs text-text-muted mt-1">Usa el mismo rol en todas las que marques.</p>
+          </div>
+        )}
         <div>
           <label className={LABEL}>{editando ? 'Nueva contraseña (opcional)' : 'Contraseña *'}</label>
           <div className="relative">
@@ -642,7 +710,7 @@ function EliminarModal({
       <div className="p-5 space-y-4">
         <p className="text-sm text-text-soft">
           Se eliminará la cuenta de <strong className="text-text">{usuario.full_name}</strong> ({usuario.email}). Su historial
-          (movimientos, pedidos y bitácora) se conserva con su nombre.
+          ({defensaActiva() ? 'movimientos y bitácora' : 'movimientos, pedidos y bitácora'}) se conserva con su nombre.
         </p>
         <p className="text-sm text-text-soft">
           Si solo se ausentará un tiempo, es mejor <strong className="text-text">desactivarlo</strong> con el botón de encendido.
@@ -684,6 +752,7 @@ function RolModal({
   onGuardado: (msg: string) => void;
 }) {
   const nivelMax = perfil.nivel - 1;
+  const defensa = useDefensa(); // modo defensa: sin permisos de la web
   const [nombre, setNombre] = useState(rol?.nombre ?? '');
   const [descripcion, setDescripcion] = useState(rol?.descripcion ?? '');
   const [nivel, setNivel] = useState(String(rol?.nivel ?? Math.min(30, nivelMax)));
@@ -806,7 +875,7 @@ function RolModal({
 
         <div className="space-y-3">
           <p className={LABEL}>Permisos</p>
-          {GRUPOS_PERMISOS.map((g) => (
+          {GRUPOS_PERMISOS.filter((g) => !(defensa && g.grupo.includes('web'))).map((g) => (
             <div key={g.grupo} className="border border-border rounded-lg p-3">
               <p className="text-xs font-semibold text-text mb-2">{g.grupo}</p>
               <div className="grid grid-cols-2 gap-2">
@@ -828,7 +897,7 @@ function RolModal({
               </div>
             </div>
           ))}
-          <p className="text-xs text-text-muted">Todos pueden ver Dashboard, Productos, Movimientos, Pedidos y Código de barras.</p>
+          <p className="text-xs text-text-muted">Todos pueden ver Dashboard, Productos, Movimientos{defensa ? '' : ', Pedidos'} y Código de barras.</p>
         </div>
 
         {rol && !rol.es_sistema && enUso > 0 && (
@@ -885,7 +954,7 @@ function RolModal({
               </button>
             )}
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <button type="button" onClick={onClose} disabled={guardando !== null} className={BTN}>
               Cancelar
             </button>

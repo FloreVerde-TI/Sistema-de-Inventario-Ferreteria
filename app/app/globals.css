@@ -422,7 +422,43 @@
 .tema-mecer { animation: tema-mecer 3.5s ease-in-out infinite; transform-origin: top center; }
 .tema-mecer.origin-bottom { transform-origin: bottom center; }
 
+/* Botón de pausa: los adornos se congelan donde están (casi no gastan nada) */
+html[data-anim-pausa] .tema-anim { animation-play-state: paused !important; }
+
 /* Si la compu pide "reducir movimiento", los adornos quedan quietos */
 @media (prefers-reduced-motion: reduce) {
   .tema-anim { animation: none !important; }
+}
+
+/* =====================================================================
+   COLORES POR FERRETERÍA (<html data-tienda="...">)
+   Flore Verde usa los colores base (verde). Ferre Fuerte: rojo + dorado.
+   Las temáticas de temporada, más abajo en prioridad, se ponen encima.
+   ===================================================================== */
+:root[data-tienda="ferrefuerte"]:not([data-tema]),
+:root[data-tienda="ferrefuerte"]:not([data-tema]) .card-light {
+  --primary: #c62828;
+  --primary-dark: #a31f1f;
+  --primary-light: #ef5350;
+  --primary-soft: #fdecea;
+  --primary-ink: #9b1c1c;
+}
+:root[data-tienda="ferrefuerte"]:not([data-tema]) {
+  --bg: #f7f3ee;
+  --bg-gradient: linear-gradient(160deg, #fbf8f4 0%, #f6efe6 55%, #f1e4cf 100%);
+  --sidebar-gradient: linear-gradient(180deg, #ffffff 0%, #f8f1e7 100%);
+}
+:root.dark[data-tienda="ferrefuerte"]:not([data-tema]) {
+  --primary: #e53935;
+  --primary-dark: #c62828;
+  --primary-light: #ef5350;
+  --primary-soft: #3a1212;
+  --primary-ink: #fbbf24; /* dorado del logo */
+  --bg: #0c0b0a;
+  --bg-gradient: linear-gradient(160deg, #0a0908 0%, #15110d 55%, #221810 100%);
+  --sidebar-gradient: linear-gradient(180deg, #13100d 0%, #0e0c0a 60%, #1d150e 100%);
+  --surface: #14110e;
+  --surface-alt: #1b1712;
+  --border: #2e271f;
+  --border-strong: #43382b;
 }

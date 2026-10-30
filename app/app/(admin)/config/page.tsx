@@ -97,13 +97,16 @@ export default function ConfigPage() {
   const [saving, setSaving] = useState(false);
   const [aviso, setAviso] = useState<Aviso>(null);
   const [logoFallo, setLogoFallo] = useState(false);
+  // Fila de configuración de la ferretería actual (hay una por tienda)
+  const [filaId, setFilaId] = useState<number | null>(null);
 
   useEffect(() => {
     async function cargar() {
-      const { data, error } = await supabase.from('settings').select(COLUMNAS).eq('id', 1).maybeSingle();
+      const { data, error } = await supabase.from('settings').select(`id, ${COLUMNAS}`).maybeSingle();
       if (error) setAviso({ tipo: 'error', texto: `No se pudo cargar la configuración: ${error.message}` });
       else if (data) {
         const fila = data as unknown as Fila;
+        setFilaId((data as unknown as { id: number }).id);
         const c = aConfig(fila);
         setForm(c);
         setOriginal(c);
@@ -155,7 +158,7 @@ export default function ConfigPage() {
         logo_url: texto('logo_url'),
         updated_at: ahora,
       })
-      .eq('id', 1)
+      .eq('id', filaId ?? -1)
       .select('id');
     setSaving(false);
 
@@ -166,7 +169,7 @@ export default function ConfigPage() {
     await registrarActividad({
       accion: 'editar',
       entidad: 'configuracion',
-      entidad_id: '1',
+      entidad_id: String(filaId ?? ''),
       detalle: `Cambió: ${cambios.join(', ')}`,
     });
     // Logo reemplazado o quitado: se borra el anterior de nuestro Storage
@@ -183,7 +186,7 @@ export default function ConfigPage() {
   return (
     <AdminLayout>
       <form onSubmit={guardar} className="space-y-6 max-w-5xl">
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 gap-4">
           <div>
             <h2 className="text-2xl font-bold text-text tracking-tight">Configuración</h2>
             <p className="text-text-muted text-sm">
@@ -231,7 +234,7 @@ export default function ConfigPage() {
                     className={FIELD}
                     value={form.nombre_comercial}
                     onChange={(e) => set('nombre_comercial', e.target.value)}
-                    placeholder="Ej. Flore Verde Ferretería"
+                    placeholder="Ej. Ferretería El Martillo"
                   />
                 </div>
                 <div>
@@ -308,7 +311,7 @@ export default function ConfigPage() {
                   maxLength={150}
                   value={form.pie_reportes}
                   onChange={(e) => set('pie_reportes', e.target.value)}
-                  placeholder="Ej. Documento interno · Flore Verde SRL"
+                  placeholder="Ej. Documento interno · Uso exclusivo de la empresa"
                 />
                 <p className="text-xs text-text-muted mt-2">{form.pie_reportes.length}/150 caracteres</p>
               </Seccion>

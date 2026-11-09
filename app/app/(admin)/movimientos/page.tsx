@@ -9,6 +9,7 @@ import { exportReport, type Column, type Format } from '@/lib/exportar';
 import { VerDocumento } from '@/components/Documento';
 import { useDefensa, defensaActiva } from '@/lib/defensa';
 import { Search, Download, ChevronDown, FileSpreadsheet, FileText, X, Loader2 } from 'lucide-react';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 type ProductName = Pick<Product, 'id' | 'nombre'>;
 type MovimientoRow = Pick<
@@ -129,6 +130,7 @@ export default function MovimientosPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  useLimpiarAlSalir(setError, setNotice); // avisos fuera al volver a la pantalla
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);

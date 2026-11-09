@@ -11,6 +11,9 @@ import SubirImagen from '@/components/SubirImagen';
 import { useDefensa } from '@/lib/defensa';
 import CodigosAdicionales from '@/components/CodigosAdicionales';
 import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
+import ElegirPlantilla from '@/components/ElegirPlantilla';
+import PromoProducto from '@/components/PromoProducto';
+import { imagenPredeterminada } from '@/lib/plantillas';
 import { Product, Category } from '@/types';
 import { Save, X, Loader2, Package, Globe, CheckCircle2, Power } from 'lucide-react';
 
@@ -31,7 +34,7 @@ type ProductRow = { proveedor_id: string | null } & Pick<
   | 'imagen_principal'
   | 'activo'
   | 'habilitado'
->;
+> & { marca: string | null };
 
 interface FormState {
   nombre: string;
@@ -40,6 +43,7 @@ interface FormState {
   nuevaCategoria: string;
   proveedor: string; // id del proveedor, '' (ninguno) o NEW_PROVEEDOR
   nuevoProveedor: string;
+  marca: string;
   precio: string;
   sku: string;
   codigo_barras: string;
@@ -54,7 +58,7 @@ const NEW_CATEGORY = '__nueva__';
 const NEW_PROVEEDOR = '__nuevo_proveedor__';
 
 const PRODUCT_FIELDS =
-  'id, nombre, descripcion, categoria_id, precio, sku, codigo_barras, stock, stock_minimo, ubicacion, imagen_principal, activo, habilitado, proveedor_id';
+  'id, nombre, descripcion, categoria_id, precio, sku, codigo_barras, stock, stock_minimo, ubicacion, imagen_principal, activo, habilitado, proveedor_id, marca';
 
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
 const FIELD =
@@ -83,6 +87,7 @@ function toForm(p: ProductRow): FormState {
     nuevaCategoria: '',
     proveedor: p.proveedor_id ?? '',
     nuevoProveedor: '',
+    marca: p.marca ?? '',
     precio: p.precio === null || p.precio === undefined ? '' : String(p.precio),
     sku: p.sku ?? '',
     codigo_barras: p.codigo_barras ?? '',
@@ -281,6 +286,9 @@ function EditarProductoForm() {
 
       // 3. Actualizar (el stock NO se toca: cambia solo con Entradas/Salidas)
       const visibleEnWeb = form.habilitado && form.enWeb;
+      // Sin imagen: plantilla al azar de su categoría o, si no hay, el logo de la ferretería
+      const nombreCat = creatingCategory ? nuevaCat : categories.find((c) => c.id === categoriaId)?.nombre;
+      const imagenNueva = form.imagen.trim() || (await imagenPredeterminada(nombreCat)) || '';
       const { error: updErr } = await supabase
         .from('productos')
         .update({
@@ -288,12 +296,13 @@ function EditarProductoForm() {
           descripcion: form.descripcion.trim(),
           categoria_id: categoriaId,
           proveedor_id: proveedorId,
+          marca: form.marca.trim() || null,
           precio,
           sku: form.sku.trim() || null,
           codigo_barras: barras || null,
           stock_minimo: minimo,
           ubicacion: form.ubicacion.trim() || null,
-          imagen_principal: form.imagen.trim() || null,
+          imagen_principal: imagenNueva || null,
           activo: visibleEnWeb,
           habilitado: form.habilitado,
         })
@@ -301,7 +310,6 @@ function EditarProductoForm() {
       if (updErr) throw updErr;
 
       // Si se cambió o quitó la imagen, se borra la anterior de nuestro Storage
-      const imagenNueva = form.imagen.trim();
       if (imagenOriginal && imagenOriginal !== imagenNueva) {
         await borrarImagenSiEsNuestra(imagenOriginal);
       }
@@ -326,7 +334,7 @@ function EditarProductoForm() {
 
       setForm((prev) =>
         prev
-          ? { ...prev, categoria: categoriaId, nuevaCategoria: '', proveedor: proveedorId ?? '', nuevoProveedor: '', enWeb: visibleEnWeb }
+          ? { ...prev, categoria: categoriaId, nuevaCategoria: '', proveedor: proveedorId ?? '', nuevoProveedor: '', enWeb: visibleEnWeb, imagen: imagenNueva }
           : prev
       );
       setSuccess(`Producto "${nombre}" actualizado correctamente.`);
@@ -480,6 +488,17 @@ function EditarProductoForm() {
                 </div>
 
                 <div>
+                  <label className={LABEL}>Marca (opcional)</label>
+                  <input
+                    className={FIELD}
+                    maxLength={60}
+                    value={form.marca}
+                    onChange={(e) => set('marca', e.target.value)}
+                    placeholder="Ej. Stanley, Truper"
+                  />
+                </div>
+
+                <div>
                   <label className={LABEL}>Código (SKU)</label>
                   <input
                     className={FIELD}
@@ -594,6 +613,14 @@ function EditarProductoForm() {
                   setImgFailed(false);
                 }}
               />
+              <ElegirPlantilla
+                categoria={creatingCategory ? form.nuevaCategoria : categories.find((c) => c.id === form.categoria)?.nombre}
+                actual={form.imagen.trim()}
+                onElegir={(url) => {
+                  set('imagen', url);
+                  setImgFailed(false);
+                }}
+              />
               <label className={`${LABEL} mt-4`}>O pega el enlace de una imagen</label>
               <input
                 className={FIELD}
@@ -665,6 +692,10 @@ function EditarProductoForm() {
               </label>
               )}
             </div>
+
+            <SiPuede permiso="promociones">
+              <PromoProducto productoId={id} nombre={form.nombre.trim()} precio={Number(form.precio) || 0} defensa={defensa} />
+            </SiPuede>
 
             <button
               type="submit"

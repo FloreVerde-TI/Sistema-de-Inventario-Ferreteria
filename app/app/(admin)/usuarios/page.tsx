@@ -5,6 +5,7 @@ import AdminLayout, { usePerfil, Permiso, PerfilSesion, Tienda } from '@/compone
 import { supabase } from '@/lib/supabase';
 import { registrarActividad } from '@/lib/actividad';
 import { useDefensa, defensaActiva } from '@/lib/defensa';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 import {
   UserPlus,
   Edit,
@@ -49,6 +50,7 @@ const GRUPOS_PERMISOS: { grupo: string; items: { key: Permiso; label: string }[]
       { key: 'productos_editar', label: 'Editar productos' },
       { key: 'productos_deshabilitar', label: 'Habilitar / deshabilitar' },
       { key: 'productos_eliminar', label: 'Eliminar productos' },
+      { key: 'promociones', label: 'Ofertas, descuentos y paquetes' },
     ],
   },
   {
@@ -150,6 +152,7 @@ function UsuariosContenido() {
   const [roles, setRoles] = useState<Rol[]>([]);
   const [loading, setLoading] = useState(true);
   const [aviso, setAviso] = useState<Aviso>(null);
+  useLimpiarAlSalir(setAviso); // avisos fuera al volver a la pantalla
 
   const [creando, setCreando] = useState(false);
   const [editando, setEditando] = useState<Usuario | null>(null);

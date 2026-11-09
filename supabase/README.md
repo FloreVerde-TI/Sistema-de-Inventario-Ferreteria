@@ -30,3 +30,7 @@ en Supabase → SQL Editor. No se ejecutan solos: es solo historial y respaldo.
 | 19 | datos_prueba_ferrefuerte | Datos de prueba de Ferre Fuerte |
 | 20 | arreglo_web_tiendas | La web vuelve a ver productos tras el 18 |
 | 21 | demo_flore_verde | Catálogo de demostración: 35 productos ferreteros con historial |
+| 22 / 22a | promociones_paquetes | Descuentos, ofertas y paquetes; precio con promoción calculado en la base (22a: revisión, solo lectura) |
+| 23 | marca_y_regalia | Marca opcional del producto y productos de regalía en paquetes |
+| 24 | tarjetas_para_jefe | El Jefe puede guardar las tarjetas de promociones |
+| 25 | limpieza_para_datos_oficiales | ⚠️ Borra todos los datos de una ferretería para cargar el Excel oficial |

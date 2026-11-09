@@ -43,13 +43,24 @@ export async function subirImagen(file: File, carpeta: CarpetaImagen): Promise<s
   return supabase.storage.from(BUCKET).getPublicUrl(nombre).data.publicUrl;
 }
 
-/** Si el enlace es de nuestro Storage, borra el archivo (para no acumular imágenes sin uso). */
+/**
+ * Si el enlace es de nuestro Storage, borra el archivo (para no acumular imágenes sin uso).
+ * Nunca borra las plantillas (demo-…) ni una imagen que todavía use algún producto
+ * (por ejemplo el logo, que se pone a los productos sin imagen ni categoría).
+ * Se llama DESPUÉS de guardar el cambio en la base.
+ */
 export async function borrarImagenSiEsNuestra(url: string | null | undefined): Promise<void> {
   if (!url) return;
   const marca = `/storage/v1/object/public/${BUCKET}/`;
   const i = url.indexOf(marca);
   if (i === -1) return; // es un enlace externo: no se toca
   const ruta = decodeURIComponent(url.slice(i + marca.length).split('?')[0]);
+  if (ruta.includes('/demo-')) return;
+  const { count, error: errUso } = await supabase
+    .from('productos')
+    .select('id', { count: 'exact', head: true })
+    .eq('imagen_principal', url);
+  if (errUso || (count ?? 0) > 0) return;
   const { error } = await supabase.storage.from(BUCKET).remove([ruta]);
   if (error) console.error('No se pudo borrar la imagen anterior:', error.message);
 }

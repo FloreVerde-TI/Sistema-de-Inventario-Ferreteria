@@ -7,7 +7,11 @@ import { registrarActividad } from '@/lib/actividad';
 import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import SubirImagen from '@/components/SubirImagen';
 import GestionCatalogos from '@/components/GestionCatalogos';
+import TarjetasPromo from '@/components/TarjetasPromo';
+import { usePerfil } from '@/components/AdminLayout';
+import { useDefensa } from '@/lib/defensa';
 import { Building2, Package, FileText, Image as ImageIcon, Save, Loader2, X } from 'lucide-react';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 type Config = {
   business_name: string;
@@ -90,12 +94,17 @@ function Seccion({
 }
 
 export default function ConfigPage() {
+  const defensa = useDefensa(); // modo defensa: sin nada de la página web
+  const { puede } = usePerfil();
+  // Jefe (tiene "promociones" pero no "config_editar"): solo las tarjetas de promociones
+  const soloTarjetas = !puede('config_editar');
   const [form, setForm] = useState<Config>(VACIO);
   const [original, setOriginal] = useState<Config>(VACIO);
   const [actualizado, setActualizado] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [aviso, setAviso] = useState<Aviso>(null);
+  useLimpiarAlSalir(setAviso); // avisos fuera al volver a la pantalla
   const [logoFallo, setLogoFallo] = useState(false);
   // Fila de configuración de la ferretería actual (hay una por tienda)
   const [filaId, setFilaId] = useState<number | null>(null);
@@ -182,6 +191,24 @@ export default function ConfigPage() {
   }
 
   const logoUrl = form.logo_url.trim() || '/logo.png';
+
+  if (soloTarjetas) {
+    return (
+      <AdminLayout>
+        <div className="space-y-6 max-w-5xl">
+          <div>
+            <h2 className="text-2xl font-bold text-text tracking-tight">Configuración</h2>
+            <p className="text-text-muted text-sm">Promociones de la página web</p>
+          </div>
+          {defensa ? (
+            <div className={`${CARD} p-10 text-center text-text-muted`}>No hay opciones disponibles para tu rol.</div>
+          ) : (
+            <TarjetasPromo filaId={filaId} />
+          )}
+        </div>
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout>
@@ -319,6 +346,9 @@ export default function ConfigPage() {
 
             {/* Catálogos: se guardan al instante, no dependen de "Guardar cambios" */}
             <GestionCatalogos />
+
+            {/* Sellos de la web: se guardan con su propio botón */}
+            {!defensa && <TarjetasPromo filaId={filaId} />}
 
             <Seccion icon={ImageIcon} titulo="Logo de los reportes" sub="Si lo dejas vacío se usa el logo actual del sistema">
               <div className="flex gap-6 items-start">

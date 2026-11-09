@@ -8,6 +8,7 @@ import SiPuede from '@/components/SiPuede';
 import { usePerfil } from '@/components/AdminLayout';
 import { Product } from '@/types';
 import { Search, Eye, X, Check, Ban, ClipboardCheck, RotateCcw } from 'lucide-react';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 type Estado = 'Pendiente' | 'Aprobado' | 'Rechazado';
 type EstadoFilter = 'all' | Estado;
@@ -28,7 +29,17 @@ type PedidoRow = {
   reabierto_nombre: string | null;
   reabierto_en: string | null;
 };
-type DetalleRow = { id: string; producto_id: string | null; cantidad: number; precio_unitario: number };
+type DetalleRow = {
+  id: string;
+  producto_id: string | null;
+  cantidad: number;
+  precio_unitario: number;
+  // Promociones (script 22): precio normal y, si vino en un paquete, cuál
+  precio_normal: number | null;
+  promocion_id: string | null;
+  paquete_id: string | null;
+  paquete_nombre: string | null;
+};
 type ProductInfo = Pick<Product, 'id' | 'nombre' | 'stock'>;
 
 type Filters = { search: string; desde: string; hasta: string; estado: EstadoFilter; pago: PagoFilter };
@@ -100,6 +111,7 @@ export default function PedidosPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  useLimpiarAlSalir(setError, setNotice); // avisos fuera al volver a la pantalla
   const [selected, setSelected] = useState<PedidoRow | null>(null);
   const [reopening, setReopening] = useState<PedidoRow | null>(null);
   // Tiempo real: cuando llega o cambia un pedido, la lista se recarga sola (sin parpadear)
@@ -625,8 +637,9 @@ function PedidoModal({
     async function loadItems() {
       const { data, error: err } = await supabase
         .from('detalle_pedido')
-        .select('id, producto_id, cantidad, precio_unitario')
-        .eq('pedido_id', pedido.id);
+        .select('id, producto_id, cantidad, precio_unitario, precio_normal, promocion_id, paquete_id, paquete_nombre')
+        .eq('pedido_id', pedido.id)
+        .order('paquete_id', { nullsFirst: true });
       if (cancelled) return;
       if (err) {
         setError(err.message);
@@ -760,11 +773,21 @@ function PedidoModal({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {items.map((i) => {
+                    {items.map((i, n) => {
                       const prod = i.producto_id ? products.get(i.producto_id) : undefined;
                       const negative = prod !== undefined && (prod.stock ?? 0) < 0;
+                      const rebajado = i.precio_normal != null && Number(i.precio_normal) > Number(i.precio_unitario);
+                      const nuevoPaquete = i.paquete_id && items[n - 1]?.paquete_id !== i.paquete_id;
                       return (
-                        <tr key={i.id} className={negative ? 'bg-danger-soft' : ''}>
+                        <React.Fragment key={i.id}>
+                        {nuevoPaquete && (
+                          <tr className="bg-info-soft">
+                            <td colSpan={4} className={`${TD} text-xs font-semibold text-sky-800`}>
+                              Paquete: {i.paquete_nombre ?? 'Paquete'}
+                            </td>
+                          </tr>
+                        )}
+                        <tr className={negative ? 'bg-danger-soft' : ''}>
                           <td className={TD}>
                             <div className="font-medium text-text">{prod?.nombre ?? 'Producto no disponible'}</div>
                             {prod && (
@@ -775,11 +798,22 @@ function PedidoModal({
                             )}
                           </td>
                           <td className={`${TD} text-right text-text`}>{i.cantidad}</td>
-                          <td className={`${TD} text-right text-text-soft`}>{formatPrice(i.precio_unitario)}</td>
+                          <td className={`${TD} text-right text-text-soft`}>
+                            {rebajado && (
+                              <span className="block text-[11px] text-text-muted line-through">{formatPrice(Number(i.precio_normal))}</span>
+                            )}
+                            <span className={rebajado ? 'text-danger font-semibold' : ''}>{formatPrice(i.precio_unitario)}</span>
+                            {rebajado && (
+                              <span className="block text-[10px] font-semibold uppercase text-danger">
+                                {i.paquete_id ? 'En paquete' : 'Promoción'}
+                              </span>
+                            )}
+                          </td>
                           <td className={`${TD} text-right font-semibold text-text`}>
                             {formatPrice(i.cantidad * i.precio_unitario)}
                           </td>
                         </tr>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>

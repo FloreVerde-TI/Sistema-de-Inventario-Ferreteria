@@ -6,6 +6,7 @@ import { traerTodo } from '@/lib/paginar';
 import { registrarActividad } from '@/lib/actividad';
 import { usePerfil } from '@/components/AdminLayout';
 import { Tags, Truck, Trash2, Power, Loader2, X, Search, AlertTriangle } from 'lucide-react';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 // =====================================================================
 // CATÁLOGOS: categorías y proveedores
@@ -34,6 +35,7 @@ export default function GestionCatalogos() {
   const [productos, setProductos] = useState<ProductoMini[]>([]);
   const [cargando, setCargando] = useState(true);
   const [aviso, setAviso] = useState<{ tipo: 'error' | 'exito'; texto: string } | null>(null);
+  useLimpiarAlSalir(setAviso); // avisos fuera al volver a la pantalla
   const [abierto, setAbierto] = useState<{ tipo: Tipo; item: Item } | null>(null);
 
   const cargar = useCallback(async () => {

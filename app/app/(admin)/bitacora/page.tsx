@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
 import { useDefensa, defensaActiva } from '@/lib/defensa';
 import { Search, Download, ChevronDown, FileSpreadsheet, FileText, X } from 'lucide-react';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 type Fila = {
   id: number;
@@ -32,6 +33,8 @@ const ENTIDADES: Record<string, string> = {
   usuario: 'Usuario',
   rol: 'Rol',
   configuracion: 'Configuración',
+  promocion: 'Promoción',
+  paquete: 'Paquete',
 };
 
 const ACCIONES: Record<string, { label: string; clase: string }> = {
@@ -104,6 +107,7 @@ export default function BitacoraPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  useLimpiarAlSalir(setError, setNotice); // avisos fuera al volver a la pantalla
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);

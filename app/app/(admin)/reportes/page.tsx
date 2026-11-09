@@ -7,6 +7,8 @@ import { traerTodo } from '@/lib/paginar';
 import { Product, Category, Movimiento } from '@/types';
 import { exportReport, formatMoney, type Column, type ExportSpec, type Format } from '@/lib/exportar';
 import { useDefensa, defensaActiva } from '@/lib/defensa';
+import { cargarPromosVigentes, etiquetaPromo } from '@/lib/promos';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 import {
   FileSpreadsheet, FileText, Package, AlertTriangle, Ban, ArrowLeftRight, ShoppingCart,
   SlidersHorizontal, X, Loader2, Hourglass,
@@ -40,7 +42,8 @@ type PedidoRow = {
   reabierto_en: string | null;
 };
 
-type ProductItem = ProductRow & { categoria: string; proveedor: string };
+// "precio" ya trae el precio con promoción (si la hay); "precio_normal" guarda el de siempre
+type ProductItem = ProductRow & { categoria: string; proveedor: string; precio_normal: number | null; promo: string };
 // Producto sin movimiento: fecha del último movimiento y días sin moverse
 type SinMovItem = ProductItem & { ultimo: string | null; dias: number | null };
 type MovItem = MovRow & { producto: string };
@@ -141,6 +144,8 @@ const PRODUCT_COLUMNS: Column<ProductItem>[] = [
   { key: 'categoria', label: 'Categoría', get: (p) => p.categoria },
   { key: 'proveedor', label: 'Proveedor', get: (p) => p.proveedor },
   { key: 'precio', label: 'Precio', get: (p) => p.precio ?? 0, right: true, money: true },
+  { key: 'precio_normal', label: 'Precio normal', get: (p) => p.precio_normal ?? 0, right: true, money: true },
+  { key: 'promo', label: 'Promoción', get: (p) => p.promo },
   { key: 'stock', label: 'Stock', get: (p) => p.stock ?? 0, right: true },
   { key: 'minimo', label: 'Mínimo', get: (p) => p.stock_minimo ?? 0, right: true },
   {
@@ -199,10 +204,11 @@ const ALL_KEYS: Record<Source, string[]> = {
 /* ---------- Carga de datos ---------- */
 
 async function loadProducts(f: ProdFilter): Promise<ProductItem[]> {
-  const [catRes, provRes, prods] = await Promise.all([
+  const [catRes, provRes, prods, promos] = await Promise.all([
     supabase.from('categorias').select('id, nombre'),
     supabase.from('proveedores').select('id, nombre'),
     fetchAll<ProductRow>((a, b) => supabase.from('productos').select(PRODUCT_FIELDS).order('nombre').order('id').range(a, b)),
+    cargarPromosVigentes(),
   ]);
   if (catRes.error) throw catRes.error;
   if (provRes.error) throw provRes.error;
@@ -217,11 +223,18 @@ async function loadProducts(f: ProdFilter): Promise<ProductItem[]> {
         (f.categoria === 'all' || p.categoria_id === f.categoria) &&
         matchesProv(p)
     )
-    .map((p) => ({
-      ...p,
-      categoria: (p.categoria_id && names.get(p.categoria_id)) || 'Sin categoría',
-      proveedor: (p.proveedor_id && provNames.get(p.proveedor_id)) || '',
-    }));
+    .map((p) => {
+      // Los reportes usan el precio real de venta: con la promoción vigente, si la hay
+      const promo = promos.get(p.id);
+      return {
+        ...p,
+        precio: promo ? promo.precio_final : p.precio,
+        precio_normal: p.precio,
+        promo: promo ? etiquetaPromo(promo) : '',
+        categoria: (p.categoria_id && names.get(p.categoria_id)) || 'Sin categoría',
+        proveedor: (p.proveedor_id && provNames.get(p.proveedor_id)) || '',
+      };
+    });
 }
 
 async function loadMovements(f: MovFilter): Promise<MovItem[]> {
@@ -372,7 +385,7 @@ async function buildInventario(f: ProdFilter, categories: CategoryRow[], proveed
   return {
     title: 'Inventario completo',
     file: 'inventario_completo',
-    columns: pick(PRODUCT_COLUMNS, ['sku', 'barras', 'nombre', 'categoria', 'proveedor', 'precio', 'stock', 'minimo', 'valor', 'ubicacion', 'estado', 'web']),
+    columns: pick(PRODUCT_COLUMNS, ['sku', 'barras', 'nombre', 'categoria', 'proveedor', 'precio_normal', 'precio', 'promo', 'stock', 'minimo', 'valor', 'ubicacion', 'estado', 'web']),
     rows,
     summary: [...prodFilterText(f, categories, proveedores), `Productos: ${rows.length}`, `Unidades: ${units}`, `Valor total: ${formatMoney(value)}`],
     totals: { nombre: 'TOTAL', stock: units, valor: value },
@@ -420,6 +433,7 @@ export default function ReportesPage() {
   const [productNames, setProductNames] = useState<ProductName[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useLimpiarAlSalir(setNotice, setError); // avisos fuera al volver a la pantalla
 
   const [invF, setInvF] = useState<ProdFilter>(EMPTY_PROD);
   const [lowF, setLowF] = useState<ProdFilter>(EMPTY_PROD);

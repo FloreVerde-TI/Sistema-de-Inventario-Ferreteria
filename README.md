@@ -15,19 +15,22 @@ Es **multi-tienda**: el mismo sistema maneja también **Ferre Fuerte**, con su i
 | **Login** | Inicio de sesión con los logos de las dos ferreterías y recuperación de contraseña por correo (`/restablecer`). |
 | **Multi-tienda** | Flore Verde y Ferre Fuerte con inventarios, usuarios y configuración separados. Botón para cambiar de ferretería; cada una con su logo, colores e ícono de pestaña. |
 | **Dashboard** | Resumen: stock bajo, agotados, entradas, salidas, pedidos y cotizaciones por responder, con gráficos por rango de fechas. |
-| **Productos** | Crear, editar, deshabilitar y eliminar. Imagen (Storage, comprimida a WebP), proveedor, ubicación, marca "En web", **varios códigos de barras** e **historial de precios**. Se actualiza en tiempo real. |
-| **Actualizar precios** | Cambio masivo por categoría, proveedor o búsqueda (% o monto, con redondeo), con vista previa antes/después. |
-| **Importar Excel** | Carga masiva desde una plantilla con revisión fila por fila y 3 confirmaciones. Detecta duplicados. |
+| **Productos** | Crear, editar, deshabilitar y eliminar. Imagen (Storage, comprimida a WebP), proveedor, **marca** (opcional), ubicación, indicador "En web", **varios códigos de barras** e **historial de precios**. Precio normal tachado y precio con promoción, etiquetas DESCUENTO/OFERTA/PAQUETE y filtro de promociones. Se actualiza en tiempo real. |
+| **Plantillas de imagen** | 35 iconos por categoría para elegir si no hay foto. Si se guarda sin imagen, se pone un icono de su categoría o el logo de la ferretería. |
+| **Ofertas y descuentos** | En Editar producto (interruptor apagado de base): descuento en % u oferta de precio fijo, con fechas y comparativa. Descuentos temporales por categoría, proveedor o toda la tienda desde Actualizar precios. El precio normal no cambia; si hay varias promociones, se usa la mejor. |
+| **Paquetes** | 2 o más productos con un solo precio: "Descontar de los existentes" (sin stock propio) o "Producto propio" (con stock). Productos de **regalía** a ₡0, comparativa de cuánto baja cada producto, lista, detalle y edición. |
+| **Actualizar precios** | Cambio masivo por categoría, proveedor o búsqueda (% o monto, con redondeo), con vista previa antes/después. Modo **"Descuento temporal"** para promociones con fecha de fin. |
+| **Importar Excel** | Carga masiva desde una plantilla (incluye Marca) con revisión fila por fila y 3 confirmaciones. Detecta duplicados. |
 | **Entradas / Salidas** | Movimientos de stock con motivo, documento, observaciones y **foto o PDF del comprobante** (guardado en privado). No permite sacar más de lo que hay. |
 | **Movimientos** | Historial unificado del panel y de la web, con búsqueda por documento y acceso al comprobante adjunto. |
-| **Pedidos Web** | Pedidos de la web con código `#XXXXXXXX`, en **tiempo real** y con contador en el menú. Se aprueban, rechazan o reabren; al rechazar, el stock vuelve solo. |
+| **Pedidos Web** | Pedidos de la web con código `#XXXXXXXX`, en **tiempo real** y con contador en el menú. Se aprueban, rechazan o reabren; al rechazar, el stock vuelve solo. Muestran el precio normal tachado y las líneas de cada paquete agrupadas. |
 | **Cotizaciones** | Consultas del formulario web, en tiempo real y con contador. Se responden **desde el sistema** (correo con la plantilla de la empresa), por Gmail o por WhatsApp; se pueden cerrar y reabrir. Exportables a Excel/PDF. |
 | **Aviso por correo** | Cada cotización nueva llega al correo de la empresa con diseño y botones (abrir, responder, WhatsApp). |
 | **Código de barras** | Búsqueda con lector o con la cámara del celular, por código principal, código adicional o SKU. |
-| **Reportes** | Excel y PDF con el logo y los datos de la empresa: inventario, stock bajo, agotados, movimientos, pedidos, **productos sin movimiento** (dinero detenido) y reporte personalizado. |
+| **Reportes** | Excel y PDF con el logo y los datos de la empresa: inventario, stock bajo, agotados, movimientos, pedidos, **productos sin movimiento** (dinero detenido) y reporte personalizado. Usan el precio real de venta (con promoción) y conservan el precio normal. |
 | **Usuarios** | Crear, editar, activar/desactivar y eliminar usuarios desde una ruta segura del servidor. Se marca a qué ferreterías entra cada uno (mismo rol en todas). |
 | **Roles y permisos** | Roles con nivel jerárquico y permisos editables. Antes de borrar un rol con usuarios, esos usuarios se pasan a otro rol. |
-| **Configuración** | Datos de la empresa (salen en reportes y correos), stock mínimo por defecto y **catálogos**: deshabilitar o borrar categorías y proveedores. |
+| **Configuración** | Datos de la empresa (salen en reportes y correos), stock mínimo por defecto, **catálogos** (deshabilitar o borrar categorías y proveedores) y **tarjetas por promociones**: textos y colores de los sellos de la web, plantillas festivas, cambio automático en fechas festivas e interruptor para mostrar u ocultar las promociones en la web. El Jefe solo ve esta última parte. |
 | **Bitácora** | Registro de quién creó, editó, borró, aprobó, rechazó o respondió cada cosa. |
 | **Buscador rápido** | `Ctrl + K` para encontrar un producto al instante (stock y ubicación). |
 | **Temáticas de temporada** | Colores y adornos animados según la fecha: Navidad, Halloween, Independencia, Día del Amor y la Amistad, Día de la Madre y Semana Santa. Cada usuario las apaga con el botón ✨. Fuera de temporada, cada ferretería tiene su animación suave (hojas o engranajes) y el botón ⏸ las pausa en computadoras lentas. |
@@ -40,11 +43,11 @@ Es **multi-tienda**: el mismo sistema maneja también **Ferre Fuerte**, con su i
 |---|---|
 | Super Administrador | Desarrolladores. Acceso total. |
 | Administrador | Dueño de la empresa. |
-| Jefe | Encargado: productos, movimientos, pedidos y reportes. |
+| Jefe | Encargado: productos, promociones, movimientos, pedidos y reportes. |
 | Empleado | Operación diaria con permisos limitados. |
 
 **Permisos disponibles:**
-- **Productos:** `productos_crear`, `productos_editar`, `productos_deshabilitar`, `productos_eliminar`
+- **Productos:** `productos_crear`, `productos_editar`, `productos_deshabilitar`, `productos_eliminar`, `promociones`
 - **Stock y reportes:** `entradas`, `salidas`, `reportes`
 - **Pedidos y cotizaciones:** `pedidos_revisar`, `pedidos_reabrir`, `cotizaciones`
 - **Administración:** `usuarios_gestionar`, `roles_gestionar`, `config_editar`, `bitacora_ver`
@@ -76,7 +79,7 @@ app/
 ├── app/
 │   ├── (admin)/            # Pantallas del panel (comparten menú y permisos)
 │   │   ├── dashboard/      # page.tsx (servidor) + DashboardCliente.tsx
-│   │   ├── productos/      # lista, nuevo, [id]/editar, precios
+│   │   ├── productos/      # lista, nuevo, [id]/editar, precios, paquetes
 │   │   ├── entradas/  salidas/  movimientos/
 │   │   ├── pedidos/  cotizaciones/
 │   │   ├── barcode/  reportes/
@@ -87,8 +90,8 @@ app/
 │   │   └── cotizaciones/aviso/    # Aviso de cotización nueva (webhook)
 │   ├── login/  restablecer/
 │   └── robots.ts                  # Que los buscadores no indexen el sistema
-├── components/   # AdminLayout, Tematica, SiPuede, SubirImagen, Documento, ImportarProductos…
-├── lib/          # supabase, actividad, paginar, imagenes, documentos, exportar, correo, temas, defensa
+├── components/   # AdminLayout, Tematica, SiPuede, SubirImagen, Documento, ImportarProductos, PromoProducto, PromoMasiva, TarjetasPromo, ElegirPlantilla…
+├── lib/          # supabase, actividad, paginar, imagenes, documentos, exportar, correo, temas, defensa, promos, plantillas, sellos, limpiarAlSalir
 ├── types/
 └── vendor/       # xlsx-0.20.3.tgz (SheetJS)
 
@@ -155,9 +158,15 @@ Todos están guardados en la carpeta [`supabase/`](supabase/).
 | 18 | Multi-tienda | Tablas `tiendas` y `usuario_tiendas`, columna `tienda_id` en todas las tablas de datos, funciones `mi_tienda()` y `cambiar_tienda()`, políticas por tienda |
 | 19 | Datos de prueba Ferre Fuerte | Productos, categorías, proveedores y movimientos de ejemplo (trae el bloque para borrarlos) |
 | 20 | Arreglo web tiendas | Función `tienda_tiene_web()`: la web solo ve tiendas con página web |
+| 21 | Demo Flore Verde | Catálogo de demostración: 35 productos con historial |
+| 22 / 22a | Promociones y paquetes | Tablas `promociones`, `paquetes`, `paquete_items`; `productos.reingreso_at`; funciones `promo_de_producto()` y `promos_vigentes()`; permiso `promociones` (22a: revisión, solo lectura) |
+| 23 | Marca y regalía | `productos.marca` (opcional) y `paquete_items.regalia` |
+| 24 | Tarjetas para el Jefe | Función `guardar_sellos_promo()` |
+| 25 | Limpieza para datos oficiales | ⚠️ Borra todos los datos de una ferretería para cargar el Excel oficial (hacer respaldo antes) |
 
 **Tablas principales:**
 - Inventario: `productos`, `codigos_barras`, `historial_precios`, `categorias`, `proveedores`, `movimientos`, `movements`
+- Promociones: `promociones`, `paquetes`, `paquete_items`
 - Web: `pedidos`, `detalle_pedido`, `cotizaciones`
 - Administración: `profiles`, `roles`, `settings` (una fila por tienda), `actividad`
 - Tiendas: `tiendas`, `usuario_tiendas`
@@ -167,6 +176,7 @@ Todos están guardados en la carpeta [`supabase/`](supabase/).
 - **Rechazo de pedido:** devuelve el stock.
 - **Movimientos del panel:** suman o restan stock.
 - **Precio:** guarda el cambio en `historial_precios`.
+- **Reingreso:** cuando un producto agotado vuelve a tener stock, guarda la fecha (`reingreso_at`).
 - **Cotizaciones:** ignoran duplicadas y limitan el spam.
 - **Bitácora:** completa el usuario como "Nombre — Rol".
 - **Usuario nuevo:** se le crea su perfil.

@@ -11,6 +11,7 @@ import { subirDocumento } from '@/lib/documentos';
 import { defensaActiva } from '@/lib/defensa';
 import { Product, Movimiento } from '@/types';
 import { Loader2, ArrowUpCircle, ScanLine } from 'lucide-react';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 type ProductOption = Pick<Product, 'id' | 'sku' | 'nombre' | 'stock' | 'habilitado'>;
 type SalidaRow = Pick<
@@ -76,6 +77,7 @@ export default function SalidasPage() {
   const [documento, setDocumento] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  useLimpiarAlSalir(setError, setSuccess); // avisos fuera al volver a la pantalla
   const [fromBarcode, setFromBarcode] = useState(false);
 
   const loadData = useCallback(async () => {

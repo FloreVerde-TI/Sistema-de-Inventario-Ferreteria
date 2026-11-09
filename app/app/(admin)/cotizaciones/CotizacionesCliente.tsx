@@ -7,6 +7,7 @@ import SiPuede from '@/components/SiPuede';
 import { traerTodo } from '@/lib/paginar';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
 import { Search, X, MessageSquareText, Mail, Send, Loader2, Phone, CheckCircle2, Archive, RotateCcw, Eye, Info, Download, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 // =====================================================================
 // COTIZACIONES de la página web
@@ -103,6 +104,7 @@ export default function CotizacionesCliente() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  useLimpiarAlSalir(setError, setNotice); // avisos fuera al volver a la pantalla
   const [selected, setSelected] = useState<CotizacionRow | null>(null);
   const [empresa, setEmpresa] = useState<Empresa>({ nombre: 'Ferretería', telefono: '', correo: '' });
   const [refresco, setRefresco] = useState(0);

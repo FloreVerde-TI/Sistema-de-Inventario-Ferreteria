@@ -13,6 +13,7 @@ import ImportarProductos from '@/components/ImportarProductos';
 import { Product, Category } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
 import { useDefensa, defensaActiva } from '@/lib/defensa';
+import { cargarPromosVigentes, etiquetaPromo, type PromoVigente } from '@/lib/promos';
 import {
   Plus,
   Search,
@@ -30,6 +31,7 @@ import {
   AlertTriangle,
   Check,
   Percent,
+  Boxes,
 } from 'lucide-react';
 
 type ProductRow = { proveedor_id: string | null } & Pick<
@@ -47,12 +49,21 @@ type ProductRow = { proveedor_id: string | null } & Pick<
   | 'stock_minimo'
   | 'ubicacion'
   | 'habilitado'
->;
+> & { marca: string | null };
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
 type ProveedorRow = { id: string; nombre: string };
 type StockStatus = 'normal' | 'low' | 'out';
 type StatusFilter = 'all' | StockStatus;
 type WebFilter = 'all' | 'web' | 'noweb';
+type PromoFilter = 'all' | 'promo' | 'paquete';
+// Paquete que descuenta de los productos existentes (no es un producto: se muestra como fila aparte)
+type PaqueteFila = {
+  id: string;
+  nombre: string;
+  precio: number;
+  en_web: boolean;
+  paquete_items: { producto_id: string; cantidad: number }[];
+};
 
 // Tarjeta blanca que se mantiene clara en modo oscuro (ver .card-light en globals.css)
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
@@ -143,7 +154,7 @@ function exportMovements(product: ProductRow, rows: MovementRow[], format: Forma
   );
 }
 
-type ProductExportRow = ProductRow & { categoria: string; proveedor: string };
+type ProductExportRow = ProductRow & { categoria: string; proveedor: string; promo: PromoVigente | null; esPaquete: boolean };
 
 const PRODUCT_COLUMNS: Column<ProductExportRow>[] = [
   { key: 'sku', label: 'Código', get: (p) => p.sku ?? '' },
@@ -151,7 +162,14 @@ const PRODUCT_COLUMNS: Column<ProductExportRow>[] = [
   { key: 'nombre', label: 'Nombre', get: (p) => p.nombre },
   { key: 'categoria', label: 'Categoría', get: (p) => p.categoria },
   { key: 'proveedor', label: 'Proveedor', get: (p) => p.proveedor },
+  { key: 'marca', label: 'Marca', get: (p) => p.marca ?? '' },
   { key: 'precio', label: 'Precio', get: (p) => p.precio ?? 0, right: true, money: true },
+  { key: 'precio_promo', label: 'Precio con promoción', get: (p) => p.promo?.precio_final ?? p.precio ?? 0, right: true, money: true },
+  {
+    key: 'promo',
+    label: 'Promoción',
+    get: (p) => [p.promo ? etiquetaPromo(p.promo) : '', p.esPaquete ? 'PAQUETE' : ''].filter(Boolean).join(' · '),
+  },
   { key: 'stock', label: 'Stock', get: (p) => p.stock ?? 0, right: true },
   { key: 'minimo', label: 'Mín.', get: (p) => p.stock_minimo ?? 0, right: true },
   { key: 'ubicacion', label: 'Ubicación', get: (p) => p.ubicacion ?? '' },
@@ -202,6 +220,7 @@ function ProductosContenido() {
       setFilterCategory('all');
       setFilterStatus('all');
       setFilterWeb('all');
+      setFilterPromo('all');
       setVerDeshabilitados(false);
       setNotice(null);
     };
@@ -209,6 +228,11 @@ function ProductosContenido() {
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
   const [filterWeb, setFilterWeb] = useState<WebFilter>('all');
+  const [filterPromo, setFilterPromo] = useState<PromoFilter>('all');
+  // Promociones vigentes (producto → mejor promoción) y productos que son paquete
+  const [promos, setPromos] = useState<Map<string, PromoVigente>>(new Map());
+  const [paquetesPropios, setPaquetesPropios] = useState<Set<string>>(new Set());
+  const [paquetesComp, setPaquetesComp] = useState<PaqueteFila[]>([]);
   const defensa = useDefensa(); // modo defensa: sin nada de la página web
   const [verDeshabilitados, setVerDeshabilitados] = useState(false);
   const [importando, setImportando] = useState(false);
@@ -229,13 +253,13 @@ function ProductosContenido() {
 
   useEffect(() => {
     async function fetchData() {
-      const [catRes, prodRes, provRes, codRes] = await Promise.all([
+      const [catRes, prodRes, provRes, codRes, promoRes, paqRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
         traerTodo((a, b) =>
           supabase
             .from('productos')
             .select(
-              'id, sku, codigo_barras, nombre, descripcion, precio, imagen_principal, activo, categoria_id, stock, stock_minimo, ubicacion, habilitado, proveedor_id'
+              'id, sku, codigo_barras, nombre, descripcion, precio, imagen_principal, activo, categoria_id, stock, stock_minimo, ubicacion, habilitado, proveedor_id, marca'
             )
             .order('nombre')
             .order('id')
@@ -245,7 +269,13 @@ function ProductosContenido() {
         traerTodo<{ producto_id: string; codigo: string }>((a, b) =>
           supabase.from('codigos_barras').select('producto_id, codigo').order('id').range(a, b)
         ),
+        cargarPromosVigentes(),
+        supabase.from('paquetes').select('id, nombre, precio, en_web, modo, producto_id, paquete_items(producto_id, cantidad)').eq('activo', true),
       ]);
+      setPromos(promoRes);
+      const paqs = (paqRes.data ?? []) as (PaqueteFila & { modo: string; producto_id: string | null })[];
+      setPaquetesPropios(new Set(paqs.filter((x) => x.producto_id).map((x) => x.producto_id as string)));
+      setPaquetesComp(paqs.filter((x) => x.modo === 'componentes'));
 
       const failed = catRes.error ?? prodRes.error;
       if (failed) {
@@ -305,9 +335,20 @@ function ProductosContenido() {
         filterWeb === 'all' || (filterWeb === 'web' ? p.activo === true : p.activo !== true);
       // Los deshabilitados se ocultan, salvo que se marque la casilla o se esté buscando
       const matchesHabilitado = p.habilitado !== false || verDeshabilitados || !!term;
-      return matchesSearch && matchesCategory && matchesStatus && matchesWeb && matchesHabilitado;
+      const matchesPromo =
+        filterPromo === 'all' || (filterPromo === 'promo' ? promos.has(p.id) : paquetesPropios.has(p.id));
+      return matchesSearch && matchesCategory && matchesStatus && matchesWeb && matchesHabilitado && matchesPromo;
     });
-  }, [products, codigosExtra, searchTerm, filterCategory, filterStatus, filterWeb, verDeshabilitados]);
+  }, [products, codigosExtra, searchTerm, filterCategory, filterStatus, filterWeb, filterPromo, promos, paquetesPropios, verDeshabilitados]);
+  const paquetesVisibles = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (filterPromo === 'promo' || filterCategory !== 'all' || filterStatus !== 'all') return [];
+    return paquetesComp.filter(
+      (q) =>
+        (!term || q.nombre.toLowerCase().includes(term)) &&
+        (filterWeb === 'all' || (filterWeb === 'web' ? q.en_web : !q.en_web))
+    );
+  }, [paquetesComp, searchTerm, filterPromo, filterCategory, filterStatus, filterWeb]);
   const totalDeshabilitados = useMemo(() => products.filter((p) => p.habilitado === false).length, [products]);
 
   async function handleExport(format: Format) {
@@ -321,6 +362,8 @@ function ProductosContenido() {
       ...p,
       categoria: (p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría',
       proveedor: (p.proveedor_id && proveedorName.get(p.proveedor_id)) || '',
+      promo: promos.get(p.id) ?? null,
+      esPaquete: paquetesPropios.has(p.id),
     }));
     try {
       await exportReport(
@@ -411,6 +454,14 @@ function ProductosContenido() {
                 <Percent size={16} /> Actualizar precios
               </Link>
             </SiPuede>
+            <SiPuede permiso="promociones">
+              <Link
+                href="/productos/paquetes"
+                className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2"
+              >
+                <Boxes size={16} /> Paquetes
+              </Link>
+            </SiPuede>
             <SiPuede permiso="productos_crear">
               <Link
                 href="/productos/nuevo"
@@ -478,6 +529,12 @@ function ProductosContenido() {
             </select>
           )}
 
+          <select className={FIELD} value={filterPromo} onChange={(e) => setFilterPromo(e.target.value as PromoFilter)}>
+            <option value="all">Con y sin promoción</option>
+            <option value="promo">En oferta o descuento</option>
+            <option value="paquete">Paquetes</option>
+          </select>
+
           <label className="flex items-center gap-2 text-sm text-text cursor-pointer whitespace-nowrap">
             <input
               type="checkbox"
@@ -502,6 +559,7 @@ function ProductosContenido() {
                     <th className={TH}>Cód. Barras</th>
                     <th className={TH}>Nombre</th>
                     <th className={TH}>Categoría</th>
+                    <th className={`${TH} text-right`}>Precio</th>
                     <th className={`${TH} text-right`}>Stock</th>
                     <th className={`${TH} text-right`}>Mín.</th>
                     <th className={TH}>Ubicación</th>
@@ -510,7 +568,63 @@ function ProductosContenido() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filteredProducts.length > 0 ? (
+                  {paquetesVisibles.map((q) => {
+                    const normal = q.paquete_items.reduce(
+                      (t, i) => t + Number(products.find((x) => x.id === i.producto_id)?.precio ?? 0) * i.cantidad,
+                      0
+                    );
+                    const disponibles = Math.min(
+                      ...q.paquete_items.map((i) => {
+                        const x = products.find((y) => y.id === i.producto_id);
+                        return x && x.habilitado !== false ? Math.floor(Math.max(x.stock ?? 0, 0) / i.cantidad) : 0;
+                      })
+                    );
+                    return (
+                      <tr key={`paq-${q.id}`} className="hover:bg-surface-alt transition-colors bg-info-soft/30">
+                        <td className={`${TD} font-bold text-text`}>—</td>
+                        <td className={`${TD} text-text-muted`}>—</td>
+                        <td className={`${TD} font-medium text-text`}>
+                          {q.nombre}
+                          <span className="block text-xs text-text-muted">
+                            {q.paquete_items
+                              .map((i) => `${i.cantidad > 1 ? `${i.cantidad}× ` : ''}${products.find((x) => x.id === i.producto_id)?.nombre ?? '—'}`)
+                              .join(' + ')}
+                          </span>
+                        </td>
+                        <td className={`${TD} text-text-soft`}>Paquete</td>
+                        <td className={`${TD} text-right whitespace-nowrap`}>
+                          <span className="inline-flex flex-col items-end leading-tight">
+                            <span className="text-[11px] text-text-muted line-through">{formatPrice(normal)}</span>
+                            <span className="font-semibold text-danger">{formatPrice(Number(q.precio))}</span>
+                          </span>
+                        </td>
+                        <td className={`${TD} text-right font-semibold text-text`} title="Paquetes que alcanzan con el stock de hoy">
+                          {disponibles}
+                        </td>
+                        <td className={`${TD} text-right text-text-muted`}>—</td>
+                        <td className={`${TD} text-text-soft`}>—</td>
+                        <td className={TD}>
+                          <div className="flex flex-col items-start gap-1">
+                            <PaqueteBadge />
+                            {q.en_web && !defensa && <WebBadge />}
+                          </div>
+                        </td>
+                        <td className={TD}>
+                          <div className="flex justify-end gap-1">
+                            <Link href={`/productos/paquetes?ver=${q.id}`} title="Ver" className={ICON_BTN}>
+                              <Eye size={16} />
+                            </Link>
+                            <SiPuede permiso="promociones">
+                              <Link href={`/productos/paquetes?editar=${q.id}`} title="Editar" className={ICON_BTN}>
+                                <Edit size={16} />
+                              </Link>
+                            </SiPuede>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredProducts.length > 0 || paquetesVisibles.length > 0 ? (
                     filteredProducts.map((p) => (
                       <tr
                         key={p.id}
@@ -530,6 +644,9 @@ function ProductosContenido() {
                         <td className={`${TD} text-text-soft`}>
                           {(p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría'}
                         </td>
+                        <td className={`${TD} text-right whitespace-nowrap`}>
+                          <Precio normal={p.precio} promo={promos.get(p.id)} />
+                        </td>
                         <td className={`${TD} text-right font-semibold text-text`}>{p.stock ?? 0}</td>
                         <td className={`${TD} text-right text-text-muted`}>{p.stock_minimo ?? 0}</td>
                         <td className={`${TD} text-text-soft`}>{p.ubicacion || '—'}</td>
@@ -541,6 +658,8 @@ function ProductosContenido() {
                               <>
                                 <StatusBadge status={getStatus(p.stock, p.stock_minimo)} />
                                 {p.activo && !defensa && <WebBadge />}
+                                {promos.get(p.id) && <PromoBadge promo={promos.get(p.id)!} />}
+                                {paquetesPropios.has(p.id) && <PaqueteBadge />}
                               </>
                             )}
                           </div>
@@ -579,7 +698,7 @@ function ProductosContenido() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={9} className="px-6 py-20 text-center text-text-muted italic">
+                      <td colSpan={10} className="px-6 py-20 text-center text-text-muted italic">
                         {products.length === 0
                           ? 'Aún no hay productos registrados.'
                           : 'No se encontraron productos con los filtros aplicados.'}
@@ -599,6 +718,7 @@ function ProductosContenido() {
           categoria={(selected.categoria_id && categoryName.get(selected.categoria_id)) || 'Sin categoría'}
           proveedor={(selected.proveedor_id && proveedorName.get(selected.proveedor_id)) || '—'}
           codigosExtra={codigosExtra.get(String(selected.id)) ?? []}
+          promo={promos.get(selected.id) ?? null}
           onClose={() => setSelected(null)}
         />
       )}
@@ -657,6 +777,36 @@ function WebBadge() {
   );
 }
 
+/** Precio normal; si hay promoción, el normal tachado y el de promoción en rojo. */
+function Precio({ normal, promo }: { normal?: number | null; promo?: PromoVigente }) {
+  if (!promo) return <span className="text-text">{formatPrice(normal)}</span>;
+  return (
+    <span className="inline-flex flex-col items-end leading-tight">
+      <span className="text-[11px] text-text-muted line-through">{formatPrice(normal)}</span>
+      <span className="font-semibold text-danger">{formatPrice(promo.precio_final)}</span>
+    </span>
+  );
+}
+
+/** Solo para promociones reales (no para cambios de precio por proveedor). */
+function PromoBadge({ promo }: { promo: PromoVigente }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-danger-soft text-red-800 whitespace-nowrap">
+      <Percent size={10} />
+      {etiquetaPromo(promo)}
+    </span>
+  );
+}
+
+function PaqueteBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-info-soft text-sky-800">
+      <Boxes size={10} />
+      Paquete
+    </span>
+  );
+}
+
 function DetailItem({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
@@ -671,12 +821,14 @@ function ProductDetailModal({
   categoria,
   proveedor,
   codigosExtra,
+  promo,
   onClose,
 }: {
   product: ProductRow;
   categoria: string;
   proveedor: string;
   codigosExtra: string[];
+  promo: PromoVigente | null;
   onClose: () => void;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
@@ -732,6 +884,7 @@ function ProductDetailModal({
                 <>
                   <StatusBadge status={getStatus(product.stock, product.stock_minimo)} />
                   {product.activo && !defensaActiva() && <WebBadge />}
+                  {promo && <PromoBadge promo={promo} />}
                 </>
               )}
             </div>
@@ -761,7 +914,7 @@ function ProductDetailModal({
 
           <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <DetailItem label="Categoría" value={categoria} />
-            <DetailItem label="Precio" value={formatPrice(product.precio)} />
+            <DetailItem label="Precio" value={<Precio normal={product.precio} promo={promo ?? undefined} />} />
             <DetailItem label="Código (SKU)" value={product.sku || '—'} />
             <DetailItem label="Código de barras" value={product.codigo_barras || '—'} />
             {codigosExtra.length > 0 && (
@@ -772,6 +925,7 @@ function ProductDetailModal({
             <DetailItem label="Stock actual" value={product.stock ?? 0} />
             <DetailItem label="Stock mínimo" value={product.stock_minimo ?? 0} />
             <DetailItem label="Proveedor" value={proveedor} />
+            <DetailItem label="Marca" value={product.marca || '—'} />
             <DetailItem label="Ubicación" value={product.ubicacion || '—'} />
           </div>
 

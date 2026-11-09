@@ -46,7 +46,8 @@ export type Permiso =
   | 'usuarios_gestionar'
   | 'roles_gestionar'
   | 'config_editar'
-  | 'bitacora_ver';
+  | 'bitacora_ver'
+  | 'promociones';
 
 /** Una ferretería del sistema (tabla "tiendas"). */
 export type Tienda = {
@@ -103,6 +104,8 @@ type NavItem = {
   icon: React.ComponentType<{ size?: number }>;
   section: string;
   permiso?: Permiso;
+  // Otro permiso que también da acceso (a una parte de la pantalla)
+  permisoAlterno?: Permiso;
 };
 
 const NAV_ITEMS: NavItem[] = [
@@ -116,7 +119,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'barcode', label: 'Código de Barras', icon: ScanLine, section: 'Operaciones' },
   { id: 'reportes', label: 'Reportes', icon: BarChart3, section: 'Operaciones', permiso: 'reportes' },
   { id: 'usuarios', label: 'Usuarios', icon: Users, section: 'Administración', permiso: 'usuarios_gestionar' },
-  { id: 'config', label: 'Configuración', icon: Settings, section: 'Administración', permiso: 'config_editar' },
+  { id: 'config', label: 'Configuración', icon: Settings, section: 'Administración', permiso: 'config_editar', permisoAlterno: 'promociones' },
   { id: 'bitacora', label: 'Bitácora', icon: ScrollText, section: 'Administración', permiso: 'bitacora_ver' },
 ];
 
@@ -124,6 +127,7 @@ const NAV_ITEMS: NavItem[] = [
 function permisoDeSubruta(pathname: string): Permiso | undefined {
   if (pathname === '/productos/nuevo') return 'productos_crear';
   if (pathname === '/productos/precios') return 'productos_editar';
+  if (pathname.startsWith('/productos/paquetes')) return 'promociones';
   if (/^\/productos\/[^/]+\/editar$/.test(pathname)) return 'productos_editar';
   return undefined;
 }
@@ -370,7 +374,9 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   const permisoPagina = permisoDeSubruta(pathname) ?? current?.permiso;
-  const sinAcceso = !!permisoPagina && !tienePermiso(perfil, permisoPagina);
+  const permisoAlterno = permisoDeSubruta(pathname) ? undefined : current?.permisoAlterno;
+  const sinAcceso =
+    !!permisoPagina && !tienePermiso(perfil, permisoPagina) && !(permisoAlterno && tienePermiso(perfil, permisoAlterno));
 
   const initials =
     (perfil.nombre.split(' ').filter(Boolean).map((n) => n[0]).join('').slice(0, 2) || '?').toUpperCase();
@@ -426,7 +432,9 @@ function AdminShell({ children }: { children: React.ReactNode }) {
               const items = NAV_ITEMS.filter(
                 (item) =>
                   item.section === section &&
-                  (!item.permiso || tienePermiso(perfil, item.permiso)) &&
+                  (!item.permiso ||
+                    tienePermiso(perfil, item.permiso) ||
+                    (!!item.permisoAlterno && tienePermiso(perfil, item.permisoAlterno))) &&
                   !(defensa && (item.id === 'pedidos' || item.id === 'cotizaciones'))
               );
               if (items.length === 0) return null;

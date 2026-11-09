@@ -7,9 +7,12 @@ import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { etiquetaUsuario, registrarActividad } from '@/lib/actividad';
 import SubirImagen from '@/components/SubirImagen';
+import ElegirPlantilla from '@/components/ElegirPlantilla';
+import { imagenPredeterminada } from '@/lib/plantillas';
 import { useDefensa } from '@/lib/defensa';
 import { Category } from '@/types';
 import { Save, X, Loader2, Package, Globe, CheckCircle2 } from 'lucide-react';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
 type ProveedorRow = { id: string; nombre: string };
@@ -21,6 +24,7 @@ interface FormState {
   nuevaCategoria: string;
   proveedor: string; // id del proveedor, '' (ninguno) o NEW_PROVEEDOR
   nuevoProveedor: string;
+  marca: string;
   precio: string;
   sku: string;
   codigo_barras: string;
@@ -42,6 +46,7 @@ const EMPTY_FORM: FormState = {
   nuevaCategoria: '',
   proveedor: '',
   nuevoProveedor: '',
+  marca: '',
   precio: '',
   sku: '',
   codigo_barras: '',
@@ -86,6 +91,7 @@ function NuevoProductoForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  useLimpiarAlSalir(setError, setSuccess); // avisos fuera al volver a la pantalla
   const [imgFailed, setImgFailed] = useState(false);
 
   const [minimoDefecto, setMinimoDefecto] = useState(EMPTY_FORM.stock_minimo);
@@ -213,6 +219,9 @@ function NuevoProductoForm() {
       }
 
       // 3. Producto (stock en 0: el stock inicial entra como movimiento)
+      // Sin imagen: plantilla al azar de su categoría o, si no hay, el logo de la ferretería
+      const nombreCat = creatingCategory ? nuevaCat : categories.find((c) => c.id === categoriaId)?.nombre;
+      const imagenFinal = imageUrl || (await imagenPredeterminada(nombreCat));
       const { data: prod, error: prodErr } = await supabase
         .from('productos')
         .insert({
@@ -220,13 +229,14 @@ function NuevoProductoForm() {
           descripcion: form.descripcion.trim(),
           categoria_id: categoriaId,
           proveedor_id: proveedorId,
+          marca: form.marca.trim() || null,
           precio,
           sku: form.sku.trim() || null,
           codigo_barras: barras || null,
           stock: 0,
           stock_minimo: minimo,
           ubicacion: form.ubicacion.trim() || null,
-          imagen_principal: imageUrl || null,
+          imagen_principal: imagenFinal || null,
           activo: form.enWeb,
         })
         .select('id')
@@ -398,6 +408,17 @@ function NuevoProductoForm() {
                 </div>
 
                 <div>
+                  <label className={LABEL}>Marca (opcional)</label>
+                  <input
+                    className={FIELD}
+                    maxLength={60}
+                    value={form.marca}
+                    onChange={(e) => set('marca', e.target.value)}
+                    placeholder="Ej. Stanley, Truper"
+                  />
+                </div>
+
+                <div>
                   <label className={LABEL}>Código (SKU)</label>
                   <input
                     className={FIELD}
@@ -525,6 +546,14 @@ function NuevoProductoForm() {
               <SubirImagen
                 carpeta="productos"
                 onSubida={(url) => {
+                  set('imagen', url);
+                  setImgFailed(false);
+                }}
+              />
+              <ElegirPlantilla
+                categoria={creatingCategory ? form.nuevaCategoria : categories.find((c) => c.id === form.categoria)?.nombre}
+                actual={form.imagen.trim()}
+                onElegir={(url) => {
                   set('imagen', url);
                   setImgFailed(false);
                 }}

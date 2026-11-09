@@ -5,8 +5,11 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { registrarActividad } from '@/lib/actividad';
-import { defensaActiva } from '@/lib/defensa';
+import { defensaActiva, useDefensa } from '@/lib/defensa';
+import { usePerfil } from '@/components/AdminLayout';
+import PromoMasiva from '@/components/PromoMasiva';
 import { X, Percent, Loader2, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
+import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 // =====================================================================
 // ACTUALIZAR PRECIOS EN MASA
@@ -70,6 +73,10 @@ function describirRegla(tipo: Tipo, valor: number, redondeo: number): string {
 }
 
 export default function PreciosMasaPage() {
+  const { puede } = usePerfil();
+  const defensa = useDefensa();
+  // 'precio' = cambia el precio normal · 'promo' = descuento temporal
+  const [modo, setModo] = useState<'precio' | 'promo'>('precio');
   const [productos, setProductos] = useState<Producto[]>([]);
   const [categorias, setCategorias] = useState<Opcion[]>([]);
   const [proveedores, setProveedores] = useState<Opcion[]>([]);
@@ -77,6 +84,7 @@ export default function PreciosMasaPage() {
   const [recarga, setRecarga] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [exito, setExito] = useState<string | null>(null);
+  useLimpiarAlSalir(setError, setExito); // avisos fuera al volver a la pantalla
 
   // Filtros
   const [categoria, setCategoria] = useState('all');
@@ -226,6 +234,30 @@ export default function PreciosMasaPage() {
         </Link>
       </div>
 
+      {puede('promociones') && (
+        <div className="grid grid-cols-2 gap-2 max-w-xl">
+          {([
+            ['precio', 'Cambiar el precio normal'],
+            ['promo', 'Descuento temporal (promoción)'],
+          ] as const).map(([valor, texto]) => (
+            <button
+              key={valor}
+              type="button"
+              onClick={() => setModo(valor)}
+              className={`px-3 py-2 text-sm font-semibold rounded-lg border transition-colors justify-center ${
+                modo === valor ? 'bg-primary text-white border-primary' : 'bg-surface border-border text-text-soft hover:bg-bg'
+              }`}
+            >
+              {texto}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {modo === 'promo' ? (
+        <PromoMasiva productos={productos} categorias={categorias} proveedores={proveedores} defensa={defensa} />
+      ) : (
+      <>
       {error && <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-4 text-sm">{error}</div>}
       {exito && (
         <div className="bg-success-soft text-success border border-success/30 rounded-lg p-4 text-sm flex items-center justify-between gap-3">
@@ -451,6 +483,8 @@ export default function PreciosMasaPage() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

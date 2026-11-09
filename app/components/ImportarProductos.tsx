@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { defensaActiva } from '@/lib/defensa';
 import { etiquetaUsuario, registrarActividad } from '@/lib/actividad';
+import { plantillaAlAzar, logoDeLaTienda } from '@/lib/plantillas';
 import { X, Download, FileUp, Loader2, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet } from 'lucide-react';
 
 // =====================================================================
@@ -18,7 +19,7 @@ import { X, Download, FileUp, Loader2, CheckCircle2, AlertTriangle, XCircle, Fil
 // =====================================================================
 
 type Campo =
-  | 'nombre' | 'sku' | 'barras' | 'categoria' | 'proveedor' | 'precio'
+  | 'nombre' | 'sku' | 'barras' | 'categoria' | 'proveedor' | 'marca' | 'precio'
   | 'stock' | 'minimo' | 'ubicacion' | 'descripcion' | 'web' | 'imagen';
 
 const CAMPOS: { campo: Campo; titulo: string; alias: string[]; obligatorio?: boolean }[] = [
@@ -27,6 +28,7 @@ const CAMPOS: { campo: Campo; titulo: string; alias: string[]; obligatorio?: boo
   { campo: 'barras', titulo: 'Código de barras', alias: ['codigodebarras', 'codigobarras', 'codbarras', 'barras', 'ean', 'upc', 'barcode'] },
   { campo: 'categoria', titulo: 'Categoría', alias: ['categoria', 'familia', 'linea', 'departamento'] },
   { campo: 'proveedor', titulo: 'Proveedor', alias: ['proveedor', 'suplidor', 'distribuidor'] },
+  { campo: 'marca', titulo: 'Marca', alias: ['marca', 'fabricante'] },
   { campo: 'precio', titulo: 'Precio', obligatorio: true, alias: ['precio', 'precioventa', 'preciodeventa', 'pvp', 'preciounitario'] },
   { campo: 'stock', titulo: 'Stock inicial', alias: ['stock', 'stockinicial', 'cantidad', 'existencias', 'existencia', 'inventario', 'unidades'] },
   { campo: 'minimo', titulo: 'Stock mínimo', alias: ['stockminimo', 'minimo', 'stockmin', 'puntodereorden'] },
@@ -45,6 +47,7 @@ type Datos = {
   barras: string | null;
   categoria: string | null;
   proveedor: string | null;
+  marca: string | null;
   precio: number;
   stock: number;
   minimo: number;
@@ -205,6 +208,7 @@ function revisarFila(n: number, celdas: unknown[], mapa: Map<number, Campo>, ex:
       barras,
       categoria,
       proveedor: texto(v('proveedor')) || null,
+      marca: texto(v('marca')).slice(0, 60) || null,
       precio: precio ?? 0,
       stock,
       minimo,
@@ -225,7 +229,7 @@ function descargarPlantilla() {
   const titulos = campos.map((c) => (c.obligatorio ? `${c.titulo} *` : c.titulo));
   const ejemploCompleto: Record<string, string | number> = {
     nombre: 'Martillo de uña 16oz', sku: 'MART-016', barras: '7501234567890', categoria: 'Herramientas manuales',
-    proveedor: 'El Tornillo', precio: 4500, stock: 20, minimo: 5, ubicacion: 'Pasillo A, Estante 3',
+    proveedor: 'El Tornillo', marca: 'Stanley', precio: 4500, stock: 20, minimo: 5, ubicacion: 'Pasillo A, Estante 3',
     descripcion: 'Mango de fibra', web: 'Sí', imagen: '',
   };
   const ejemplo = campos.map((c) => ejemploCompleto[c.campo] ?? '');
@@ -432,6 +436,8 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
 
       // 2. Productos (en lotes) y su stock inicial como Entrada
       const usuario = await etiquetaUsuario();
+      // Sin imagen: plantilla de su categoría o, si no hay, el logo de la ferretería
+      const logo = await logoDeLaTienda();
       setProgreso({ hecho: 0, total: validas.length });
       for (const lote of trozos(validas, LOTE)) {
         const { data, error: e } = await supabase
@@ -443,13 +449,14 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
               codigo_barras: d.barras,
               categoria_id: d.categoria ? catId.get(d.categoria.toLowerCase()) ?? null : null,
               proveedor_id: d.proveedor ? provId.get(d.proveedor.toLowerCase()) ?? null : null,
+              marca: d.marca,
               precio: d.precio,
               stock: 0,
               stock_minimo: d.minimo,
               ubicacion: d.ubicacion,
               descripcion: d.descripcion,
               activo: d.web,
-              imagen_principal: d.imagen,
+              imagen_principal: d.imagen || plantillaAlAzar(d.categoria) || logo,
             }))
           )
           .select('id, nombre');

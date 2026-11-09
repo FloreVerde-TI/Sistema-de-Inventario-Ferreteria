@@ -275,7 +275,7 @@ export default function BarcodePage() {
     <AdminLayout>
       <div className="space-y-6">
         {/* Encabezado */}
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold text-text tracking-tight">Consulta por código de barras</h2>
             <p className="text-text-muted text-sm">
@@ -362,7 +362,7 @@ export default function BarcodePage() {
 
         {/* Código que no existe: ofrece registrarlo */}
         {notFound && (
-          <div className={`${CARD} p-6 flex items-center justify-between gap-4`}>
+          <div className={`${CARD} p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-text break-words">
                 No se encontró ningún producto con el código «{notFound}».
@@ -371,7 +371,7 @@ export default function BarcodePage() {
                 <p className="text-sm text-text-muted mt-1">¿Registrar como nuevo producto?</p>
               </SiPuede>
             </div>
-            <div className="flex gap-3 shrink-0">
+            <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 sm:shrink-0">
               <SiPuede
                 permiso="productos_crear"
                 sino={
@@ -394,7 +394,7 @@ export default function BarcodePage() {
                 <button
                   type="button"
                   onClick={() => router.push(`/productos/nuevo?codigo=${encodeURIComponent(notFound)}`)}
-                  className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center gap-2"
+                  className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center justify-center gap-2"
                 >
                   <Plus size={16} /> Registrar como nuevo producto
                 </button>
@@ -405,21 +405,21 @@ export default function BarcodePage() {
 
         {/* Resultado */}
         {product && (
-          <div className={`${CARD} p-6 flex gap-6 relative`}>
+          <div className={`${CARD} p-4 sm:p-6 flex flex-col sm:flex-row gap-4 sm:gap-6 relative`}>
             <button
               onClick={handleClearResult}
-              className="absolute top-4 right-4 px-2.5 py-1 text-xs font-medium text-text-soft bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-1"
+              className="self-end sm:absolute sm:top-4 sm:right-4 px-2.5 py-1 text-xs font-medium text-text-soft bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-1"
             >
               <X size={14} /> Limpiar resultado
             </button>
 
-            <div className="w-40 h-40 shrink-0 rounded-xl bg-surface-alt border border-border flex items-center justify-center text-text-muted overflow-hidden">
+            <div className="w-full h-48 sm:w-40 sm:h-40 shrink-0 rounded-xl bg-surface-alt border border-border flex items-center justify-center text-text-muted overflow-hidden">
               {product.imagen_principal && !imgError ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={product.imagen_principal}
                   alt={product.nombre}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain sm:object-cover"
                   onError={() => setImgError(true)}
                 />
               ) : (
@@ -429,7 +429,7 @@ export default function BarcodePage() {
 
             <div className="flex-1 min-w-0">
               <h3
-                className={`text-xl font-bold pr-40 ${
+                className={`text-xl font-bold break-words sm:pr-40 ${
                   product.habilitado === false
                     ? 'text-text-muted line-through decoration-red-400 decoration-2'
                     : 'text-text'
@@ -462,12 +462,12 @@ export default function BarcodePage() {
                 </div>
               </div>
 
-              <div className="flex gap-3 mt-6">
+              <div className="grid grid-cols-2 sm:flex gap-2 sm:gap-3 mt-6">
                 <SiPuede permiso="entradas">
                 <button
                   onClick={() => router.push(`/entradas?producto=${product.id}&desde=barcode`)}
                   disabled={product.habilitado === false}
-                  className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 sm:px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center justify-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ArrowDownCircle size={16} /> Registrar entrada
                 </button>
@@ -476,7 +476,7 @@ export default function BarcodePage() {
                 <button
                   onClick={() => router.push(`/salidas?producto=${product.id}&desde=barcode`)}
                   disabled={product.habilitado === false}
-                  className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 sm:px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center justify-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ArrowUpCircle size={16} /> Registrar salida
                 </button>

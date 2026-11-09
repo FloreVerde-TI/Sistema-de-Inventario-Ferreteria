@@ -318,7 +318,7 @@ function UsuariosContenido() {
                         <td className={`${TD} text-text-soft`}>{u.email}</td>
                         <td className={TD}>
                           <span
-                            className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                            className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${
                               rolDe.get(u.role)?.es_super ? 'bg-primary text-white' : 'bg-primary-soft text-primary-ink'
                             }`}
                           >

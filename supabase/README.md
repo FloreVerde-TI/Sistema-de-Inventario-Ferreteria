@@ -29,3 +29,4 @@ en Supabase → SQL Editor. No se ejecutan solos: es solo historial y respaldo.
 | 18 / 18a | multi_tienda_ferrefuerte | Dos ferreterías en el mismo sistema (18a: esquema, solo lectura) |
 | 19 | datos_prueba_ferrefuerte | Datos de prueba de Ferre Fuerte |
 | 20 | arreglo_web_tiendas | La web vuelve a ver productos tras el 18 |
+| 21 | demo_flore_verde | Catálogo de demostración: 35 productos ferreteros con historial |

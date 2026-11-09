@@ -438,7 +438,7 @@ export default function PedidosPage() {
             </div>
           )}
 
-          <div className="flex items-center justify-between px-6 py-3.5 border-t border-border text-xs text-text-muted">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3.5 border-t border-border text-xs text-text-muted">
             <span>
               Mostrando {formatNumber(firstShown)}–{formatNumber(lastShown)} de {formatNumber(total)} pedidos
             </span>
@@ -446,17 +446,17 @@ export default function PedidosPage() {
               <button
                 disabled={page <= 1 || loading}
                 onClick={() => setPage((p) => p - 1)}
-                className="px-3 py-1.5 bg-surface border border-border rounded-lg text-text hover:bg-bg transition-colors disabled:opacity-40"
+                className="px-3 py-1.5 whitespace-nowrap bg-surface border border-border rounded-lg text-text hover:bg-bg transition-colors disabled:opacity-40"
               >
                 ‹ Anterior
               </button>
-              <span className="px-2">
+              <span className="px-2 whitespace-nowrap">
                 Página {page} de {totalPages}
               </span>
               <button
                 disabled={page >= totalPages || loading}
                 onClick={() => setPage((p) => p + 1)}
-                className="px-3 py-1.5 bg-surface border border-border rounded-lg text-text hover:bg-bg transition-colors disabled:opacity-40"
+                className="px-3 py-1.5 whitespace-nowrap bg-surface border border-border rounded-lg text-text hover:bg-bg transition-colors disabled:opacity-40"
               >
                 Siguiente ›
               </button>

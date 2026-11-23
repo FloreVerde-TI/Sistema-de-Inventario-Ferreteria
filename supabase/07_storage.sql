@@ -1,6 +1,6 @@
 -- =====================================================================
--- VerdeTrack · PASO 8: Permisos de imágenes (Storage, bucket "productos")
--- Ver las imágenes: cualquiera (bucket público, la web las necesita).
+-- VerdeTrack · PASO 7: Permisos de imágenes (Storage, bucket "productos")
+-- Ver las imágenes: cualquiera (bucket público).
 -- Subir / borrar: solo quien crea o edita productos (carpeta productos/)
 -- o quien edita la configuración (carpeta empresa/, el logo).
 -- =====================================================================

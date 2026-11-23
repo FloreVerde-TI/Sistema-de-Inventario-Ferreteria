@@ -1,6 +1,6 @@
 -- =====================================================================
--- VerdeTrack · REVISIÓN DE SEGURIDAD  (SOLO LECTURA: no cambia nada)
--- Nombre para guardarlo: "10 Revision de seguridad (solo lectura)"
+-- VerdeTrack · PASO 9: REVISIÓN DE SEGURIDAD  (SOLO LECTURA: no cambia nada)
+-- Nombre para guardarlo: "09 Revision de seguridad (solo lectura)"
 -- Descripción: "Lista políticas, tablas sin RLS y funciones SECURITY DEFINER para auditar."
 -- Ejecuta cada bloque por separado y pásame el resultado.
 -- =====================================================================
@@ -13,7 +13,7 @@ where schemaname = 'public' and rowsecurity = false;
 -- 2) Políticas de profiles y roles (para revisar que nadie pueda cambiarse su propio rol)
 select tablename, policyname, cmd, roles, qual, with_check
 from pg_policies
-where schemaname = 'public' and tablename in ('profiles', 'roles', 'settings', 'actividad')
+where schemaname = 'public' and tablename in ('profiles', 'roles', 'settings')
 order by tablename, cmd;
 
 -- 3) Todo lo que puede hacer el público (anon), en cualquier tabla

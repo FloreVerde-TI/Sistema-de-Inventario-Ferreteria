@@ -4,8 +4,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
-import { defensaActiva } from '@/lib/defensa';
-import { etiquetaUsuario, registrarActividad } from '@/lib/actividad';
+import { etiquetaUsuario } from '@/lib/usuario';
 import { plantillaAlAzar, logoDeLaTienda } from '@/lib/plantillas';
 import { X, Download, FileUp, Loader2, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet } from 'lucide-react';
 
@@ -20,7 +19,7 @@ import { X, Download, FileUp, Loader2, CheckCircle2, AlertTriangle, XCircle, Fil
 
 type Campo =
   | 'nombre' | 'sku' | 'barras' | 'categoria' | 'proveedor' | 'marca' | 'precio'
-  | 'stock' | 'minimo' | 'ubicacion' | 'descripcion' | 'web' | 'imagen';
+  | 'stock' | 'minimo' | 'ubicacion' | 'descripcion' | 'imagen';
 
 const CAMPOS: { campo: Campo; titulo: string; alias: string[]; obligatorio?: boolean }[] = [
   { campo: 'nombre', titulo: 'Nombre', obligatorio: true, alias: ['nombre', 'producto', 'nombredelproducto', 'nombreproducto', 'articulo'] },
@@ -34,7 +33,6 @@ const CAMPOS: { campo: Campo; titulo: string; alias: string[]; obligatorio?: boo
   { campo: 'minimo', titulo: 'Stock mínimo', alias: ['stockminimo', 'minimo', 'stockmin', 'puntodereorden'] },
   { campo: 'ubicacion', titulo: 'Ubicación', alias: ['ubicacion', 'estante', 'pasillo', 'localizacion'] },
   { campo: 'descripcion', titulo: 'Descripción', alias: ['descripcion', 'detalle', 'detalles'] },
-  { campo: 'web', titulo: 'En web (Sí/No)', alias: ['enweb', 'web', 'disponibleenweb', 'publicado', 'visibleenweb'] },
   { campo: 'imagen', titulo: 'Imagen (URL)', alias: ['imagen', 'foto', 'urlimagen', 'urldelaimagen', 'imagenurl', 'fotourl'] },
 ];
 
@@ -53,7 +51,6 @@ type Datos = {
   minimo: number;
   ubicacion: string | null;
   descripcion: string;
-  web: boolean;
   imagen: string | null;
 };
 type Fila = { n: number; datos: Datos; errores: string[]; avisos: string[] };
@@ -104,14 +101,6 @@ function numero(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function siNo(v: unknown): boolean | null {
-  const s = normalizar(v);
-  if (!s) return false;
-  if (['si', 's', 'yes', 'x', '1', 'true', 'verdadero'].includes(s)) return true;
-  if (['no', 'n', '0', 'false', 'falso'].includes(s)) return false;
-  return null;
-}
-
 // Busca la fila de títulos en las primeras 15 filas de cada hoja
 function detectarTitulos(filas: unknown[][]): { fila: number; mapa: Map<number, Campo> } | null {
   let mejor: { fila: number; mapa: Map<number, Campo> } | null = null;
@@ -120,7 +109,7 @@ function detectarTitulos(filas: unknown[][]): { fila: number; mapa: Map<number, 
     const usados = new Set<Campo>();
     (filas[i] ?? []).forEach((celda, col) => {
       // Se prueba el título completo y sin lo que va entre paréntesis o el "*"
-      // (así "Código (SKU)" o "En web (Sí/No) *" también se reconocen)
+      // (así "Código (SKU)" o "Nombre *" también se reconocen)
       const completo = normalizar(celda);
       const sinExtras = normalizar(String(celda ?? '').replace(/\([^)]*\)/g, '').replace(/\*/g, ''));
       const dentro = normalizar((String(celda ?? '').match(/\(([^)]*)\)/) ?? [])[1] ?? '');
@@ -191,10 +180,6 @@ function revisarFila(n: number, celdas: unknown[], mapa: Map<number, Campo>, ex:
   const categoria = texto(v('categoria')) || null;
   if (!categoria) avisos.push('Sin categoría');
 
-  const webRaw = v('web');
-  const web = siNo(webRaw);
-  if (web === null) avisos.push(`"En web" no reconocido ("${texto(webRaw)}"): queda en No`);
-
   const imagen = texto(v('imagen')) || null;
   if (imagen && !/^https?:\/\//i.test(imagen)) {
     avisos.push('La imagen no es un enlace (https://…): se ignora');
@@ -214,7 +199,6 @@ function revisarFila(n: number, celdas: unknown[], mapa: Map<number, Campo>, ex:
       minimo,
       ubicacion: texto(v('ubicacion')) || null,
       descripcion: texto(v('descripcion')),
-      web: web ?? false,
       imagen: imagen && /^https?:\/\//i.test(imagen) ? imagen : null,
     },
     errores,
@@ -223,14 +207,12 @@ function revisarFila(n: number, celdas: unknown[], mapa: Map<number, Campo>, ex:
 }
 
 function descargarPlantilla() {
-  // Modo defensa: la plantilla no trae la columna "En web"
-  const sinWeb = defensaActiva();
-  const campos = CAMPOS.filter((c) => !(sinWeb && c.campo === 'web'));
+  const campos = CAMPOS;
   const titulos = campos.map((c) => (c.obligatorio ? `${c.titulo} *` : c.titulo));
   const ejemploCompleto: Record<string, string | number> = {
     nombre: 'Martillo de uña 16oz', sku: 'MART-016', barras: '7501234567890', categoria: 'Herramientas manuales',
     proveedor: 'El Tornillo', marca: 'Stanley', precio: 4500, stock: 20, minimo: 5, ubicacion: 'Pasillo A, Estante 3',
-    descripcion: 'Mango de fibra', web: 'Sí', imagen: '',
+    descripcion: 'Mango de fibra', imagen: '',
   };
   const ejemplo = campos.map((c) => ejemploCompleto[c.campo] ?? '');
   const hoja = XLSX.utils.aoa_to_sheet([titulos, ejemplo]);
@@ -301,7 +283,6 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
       categoriasNuevas: cats.size,
       proveedoresNuevos: provs.size,
       unidades: validas.reduce((t, f) => t + f.datos.stock, 0),
-      enWeb: validas.filter((f) => f.datos.web).length,
     };
   }, [analisis, validas]);
 
@@ -455,7 +436,6 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
               stock_minimo: d.minimo,
               ubicacion: d.ubicacion,
               descripcion: d.descripcion,
-              activo: d.web,
               imagen_principal: d.imagen || plantillaAlAzar(d.categoria) || logo,
             }))
           )
@@ -483,11 +463,6 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
         setProgreso({ hecho: creados, total: validas.length });
       }
 
-      await registrarActividad({
-        accion: 'crear',
-        entidad: 'producto',
-        detalle: `Importó ${creados} productos desde Excel (${archivo})`,
-      });
       setResultado(
         `Se importaron ${creados} productos.` +
           (nuevasCat.length ? ` Categorías nuevas: ${nuevasCat.length}.` : '') +
@@ -546,7 +521,7 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
                 </li>
                 <li>
                   Opcionales: Código (SKU), Código de barras, Categoría, Proveedor, Stock inicial, Stock mínimo, Ubicación,
-                  Descripción, {defensaActiva() ? '' : 'En web (Sí/No) '}e Imagen (URL).
+                  Descripción e Imagen (URL).
                 </li>
                 <li>Categorías y proveedores que no existan se crean solos. El stock inicial queda registrado en Movimientos.</li>
                 <li>Antes de guardar verás una vista previa. Los productos que ya existen no se duplican.</li>
@@ -644,7 +619,6 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
                 <Dato valor={resumen.unidades} texto="unidades de stock inicial (como Entradas en Movimientos)" />
                 <Dato valor={resumen.categoriasNuevas} texto="categorías nuevas" />
                 <Dato valor={resumen.proveedoresNuevos} texto="proveedores nuevos" />
-                {!defensaActiva() && <Dato valor={resumen.enWeb} texto="productos se publicarán en la web" />}
                 <Dato valor={conError} texto="filas con error que NO se importarán" peligro={conError > 0} />
               </ul>
               <label className="flex items-start gap-3 text-sm text-text cursor-pointer border border-border rounded-lg p-3">
@@ -748,11 +722,6 @@ export default function ImportarProductos({ onClose, onImportado }: { onClose: (
               <CheckCircle2 size={44} className="mx-auto text-success mb-3" />
               <p className="text-lg font-bold text-text">Importación terminada</p>
               <p className="text-sm text-text-soft mt-1">{resultado}</p>
-              {!defensaActiva() && (
-                <p className="text-xs text-text-muted mt-3">
-                  Los productos con &quot;En web: No&quot; no aparecen en la página hasta que los publiques desde Editar producto.
-                </p>
-              )}
             </div>
           )}
         </div>

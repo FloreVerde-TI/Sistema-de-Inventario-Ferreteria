@@ -11,7 +11,7 @@ import {
   Lock,
   Mail,
   Package,
-  ShoppingCart,
+  ScanLine,
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -24,7 +24,7 @@ const INPUT =
 
 const DESTACADOS = [
   { icon: Package, texto: 'Control de stock en tiempo real' },
-  { icon: ShoppingCart, texto: 'Pedidos de la tienda web' },
+  { icon: ScanLine, texto: 'Consulta por código de barras' },
   { icon: BarChart3, texto: 'Reportes en Excel y PDF' },
 ];
 
@@ -132,19 +132,16 @@ export default function LoginPage() {
       className="relative min-h-screen flex items-center justify-center p-6 overflow-hidden"
       // Degradado fijo con los colores de la marca (no cambia con el modo oscuro)
       style={{
-        // Mitad verde (Flore Verde) y mitad roja (Ferre Fuerte), unidas por un brillo dorado
-        // para que no se ensucie el color donde se juntan
+        // Degradado verde de Flore Verde
         background: [
-          'radial-gradient(ellipse 45% 35% at 50% 50%, rgba(250, 204, 21, 0.28) 0%, transparent 70%)',
           'radial-gradient(ellipse 60% 80% at 8% 30%, #2fa354 0%, transparent 65%)',
-          'radial-gradient(ellipse 60% 80% at 92% 70%, #e53935 0%, transparent 65%)',
-          'linear-gradient(110deg, #0c3a1d 0%, #1f7a3a 30%, #8a6d12 50%, #b3261e 70%, #4d0c0c 100%)',
+          'linear-gradient(110deg, #0c3a1d 0%, #1f7a3a 45%, #17402a 100%)',
         ].join(', '),
       }}
     >
       {/* Manchas difuminadas */}
       <div className="pointer-events-none absolute -top-32 -left-32 w-[30rem] h-[30rem] rounded-full bg-[#4caf50] opacity-30 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-40 -right-24 w-[34rem] h-[34rem] rounded-full bg-[#ef5350] opacity-30 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -right-24 w-[34rem] h-[34rem] rounded-full bg-[#2fa354] opacity-30 blur-3xl" />
 
       {/* Logo grande de fondo (marca de agua) */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -154,39 +151,27 @@ export default function LoginPage() {
         aria-hidden
         className="pointer-events-none select-none absolute -left-24 -bottom-24 w-[42rem] opacity-[0.12] mix-blend-multiply -rotate-12 blur-[2px]"
       />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/logo-ferrefuerte.png"
-        alt=""
-        aria-hidden
-        className="pointer-events-none select-none absolute -right-16 -top-20 w-[26rem] opacity-[0.10] mix-blend-multiply rotate-12 blur-[2px]"
-      />
 
       <div className="relative w-full max-w-5xl">
         <div className="card-light bg-surface rounded-3xl shadow-2xl overflow-hidden grid md:grid-cols-2 min-h-[600px]">
           {/* Panel izquierdo: marca */}
           <div
             className="relative hidden md:flex flex-col justify-between p-12 text-white overflow-hidden"
-            style={{ background: 'linear-gradient(160deg, #1f7a3a 0%, #17402a 50%, #3a1414 100%)' }}
+            style={{ background: 'linear-gradient(160deg, #1f7a3a 0%, #17402a 100%)' }}
           >
             {/* Brillo suave */}
             <div className="pointer-events-none absolute -top-20 -right-20 w-80 h-80 rounded-full bg-[#6fbf73] opacity-30 blur-3xl" />
             <div className="pointer-events-none absolute -bottom-24 -left-16 w-72 h-72 rounded-full bg-[#a8dbb4] opacity-20 blur-3xl" />
 
             <div className="relative">
-              {/* Las dos ferreterías: al entrar, cada quien ve la marca de la suya */}
               <div className="flex items-center gap-3">
                 <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center overflow-hidden shadow-lg">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/logo-icono.png" alt="Flore Verde" className="w-full h-full object-contain p-1.5" />
                 </div>
-                <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center overflow-hidden shadow-lg">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/logo-ferrefuerte.png" alt="Ferre Fuerte" className="w-full h-full object-contain" />
-                </div>
               </div>
               <h1 className="mt-8 text-4xl font-bold leading-tight">Sistema de Inventario</h1>
-              <p className="mt-2 text-white/80 text-lg">Flore Verde · Ferre Fuerte</p>
+              <p className="mt-2 text-white/80 text-lg">Flore Verde SRL</p>
             </div>
 
             <ul className="relative space-y-4">
@@ -210,10 +195,6 @@ export default function LoginPage() {
                 <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center overflow-hidden shadow-md border border-border">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/logo.png" alt="Flore Verde" className="w-full h-full object-contain p-2" />
-                </div>
-                <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center overflow-hidden shadow-md">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/logo-ferrefuerte.png" alt="Ferre Fuerte" className="w-full h-full object-contain" />
                 </div>
               </div>
               <h2 className="text-3xl font-bold text-text">

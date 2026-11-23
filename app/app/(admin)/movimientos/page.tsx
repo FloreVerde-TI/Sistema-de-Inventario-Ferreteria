@@ -6,16 +6,14 @@ import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { Product, Movimiento } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
-import { VerDocumento } from '@/components/Documento';
-import { useDefensa, defensaActiva } from '@/lib/defensa';
 import { Search, Download, ChevronDown, FileSpreadsheet, FileText, X, Loader2 } from 'lucide-react';
 import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 type ProductName = Pick<Product, 'id' | 'nombre'>;
 type MovimientoRow = Pick<
   Movimiento,
-  'id' | 'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'origen' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
-> & { documento_path: string | null };
+  'id' | 'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
+>;
 type TipoFilter = 'all' | 'entrada' | 'salida';
 
 type Filters = {
@@ -29,7 +27,7 @@ type Filters = {
 const EMPTY_FILTERS: Filters = { search: '', desde: '', hasta: '', tipo: 'all', producto: 'all' };
 const PAGE_SIZE = 20;
 const EXPORT_PAGE = 1000; // límite de filas por consulta en Supabase
-const FIELDS = 'id, producto_id, tipo, cantidad, motivo, usuario, origen, proveedor, referencia, observaciones, documento_path, created_at';
+const FIELDS = 'id, producto_id, tipo, cantidad, motivo, usuario, proveedor, referencia, observaciones, created_at';
 
 // Tarjeta blanca que se mantiene clara en modo oscuro (ver .card-light en globals.css)
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
@@ -56,8 +54,6 @@ function formatNumber(n: number): string {
 function movQuery(f: Filters, products: ProductName[], count: boolean) {
   let query = supabase.from('movimientos').select(FIELDS, count ? { count: 'exact' } : undefined);
 
-  // Modo defensa: sin los movimientos que vienen de la página web
-  if (defensaActiva()) query = query.or('origen.is.null,origen.neq.web');
   if (f.tipo !== 'all') query = query.eq('tipo', f.tipo);
   if (f.producto !== 'all') query = query.eq('producto_id', f.producto);
   if (f.desde) query = query.gte('created_at', new Date(`${f.desde}T00:00:00`).toISOString());
@@ -106,7 +102,6 @@ const EXPORT_COLUMNS: Column<ExportRow>[] = [
   { key: 'proveedor', label: 'Proveedor', get: (m) => m.proveedor ?? '' },
   { key: 'referencia', label: 'Doc. referencia', get: (m) => m.referencia ?? '' },
   { key: 'usuario', label: 'Usuario', get: (m) => m.usuario ?? '' },
-  { key: 'origen', label: 'Origen', get: (m) => (m.origen === 'web' ? 'Web' : 'Panel') },
 ];
 
 function filtersSummary(f: Filters, products: ProductName[]): string[] {
@@ -134,7 +129,6 @@ export default function MovimientosPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
-  const defensa = useDefensa(); // modo defensa: oculta los movimientos de la web
 
   // Al salir de la pantalla, filtros, búsqueda y página vuelven a empezar
   useEffect(() => {
@@ -203,7 +197,7 @@ export default function MovimientosPage() {
     return () => {
       cancelled = true;
     };
-  }, [applied, page, products, defensa]);
+  }, [applied, page, products]);
 
   const setDraftField = <K extends keyof Filters>(key: K, value: Filters[K]) =>
     setDraft((prev) => ({ ...prev, [key]: value }));
@@ -237,7 +231,7 @@ export default function MovimientosPage() {
         {
           title: 'Historial de movimientos',
           file: 'historial_movimientos',
-          columns: defensaActiva() ? EXPORT_COLUMNS.filter((c) => c.key !== 'origen') : EXPORT_COLUMNS,
+          columns: EXPORT_COLUMNS,
           rows,
           summary: [
             ...filtersSummary(applied, products),
@@ -436,7 +430,6 @@ export default function MovimientosPage() {
                               {m.observaciones}
                             </div>
                           )}
-                          <VerDocumento ruta={m.documento_path} />
                         </td>
                       </tr>
                     ))

@@ -9,25 +9,21 @@ import {
   ArrowUpCircle,
   FileText,
   ScanLine,
-  ShoppingCart,
   BarChart3,
   Users,
   Settings,
-  ScrollText,
   LogOut,
   Search,
   ShieldAlert,
   MapPin,
   Loader2,
   ArrowLeftRight,
-  MessageSquareText,
   Menu,
   X as Cerrar,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ThemeToggle from '@/components/ThemeToggle';
 import { BotonPausaAnimacion, BotonTema, DecoracionTema, ProbarTemas } from '@/components/Tematica';
-import { useDefensa, useDefensaManual, alternarDefensa, marcarTiendaSinWeb } from '@/lib/defensa';
 
 // ---------------------------------------------------------------------
 // PERMISOS (los mismos nombres que en la tabla "roles" de Supabase)
@@ -39,15 +35,10 @@ export type Permiso =
   | 'productos_eliminar'
   | 'entradas'
   | 'salidas'
-  | 'pedidos_revisar'
-  | 'pedidos_reabrir'
-  | 'cotizaciones'
   | 'reportes'
   | 'usuarios_gestionar'
   | 'roles_gestionar'
-  | 'config_editar'
-  | 'bitacora_ver'
-  | 'promociones';
+  | 'config_editar';
 
 /** Una ferretería del sistema (tabla "tiendas"). */
 export type Tienda = {
@@ -58,7 +49,6 @@ export type Tienda = {
   logo: string;
   color: string;
   es_principal: boolean;
-  tiene_web: boolean;
 };
 
 export type PerfilSesion = {
@@ -68,7 +58,7 @@ export type PerfilSesion = {
   nivel: number;
   esSuper: boolean;
   permisos: string[];
-  /** "Nombre — Rol", para guardar en movimientos, pedidos, etc. */
+  /** "Nombre — Rol", para guardar en movimientos, bitácora, etc. */
   etiqueta: string;
   /** Ferretería en la que está trabajando ahora */
   tienda: Tienda;
@@ -114,20 +104,15 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'entradas', label: 'Entradas', icon: ArrowDownCircle, section: 'Principal', permiso: 'entradas' },
   { id: 'salidas', label: 'Salidas', icon: ArrowUpCircle, section: 'Principal', permiso: 'salidas' },
   { id: 'movimientos', label: 'Movimientos', icon: FileText, section: 'Principal' },
-  { id: 'pedidos', label: 'Pedidos Web', icon: ShoppingCart, section: 'Operaciones' },
-  { id: 'cotizaciones', label: 'Cotizaciones', icon: MessageSquareText, section: 'Operaciones', permiso: 'cotizaciones' },
   { id: 'barcode', label: 'Código de Barras', icon: ScanLine, section: 'Operaciones' },
   { id: 'reportes', label: 'Reportes', icon: BarChart3, section: 'Operaciones', permiso: 'reportes' },
   { id: 'usuarios', label: 'Usuarios', icon: Users, section: 'Administración', permiso: 'usuarios_gestionar' },
-  { id: 'config', label: 'Configuración', icon: Settings, section: 'Administración', permiso: 'config_editar', permisoAlterno: 'promociones' },
-  { id: 'bitacora', label: 'Bitácora', icon: ScrollText, section: 'Administración', permiso: 'bitacora_ver' },
+  { id: 'config', label: 'Configuración', icon: Settings, section: 'Administración', permiso: 'config_editar' },
 ];
 
 // Subpáginas que piden un permiso propio
 function permisoDeSubruta(pathname: string): Permiso | undefined {
   if (pathname === '/productos/nuevo') return 'productos_crear';
-  if (pathname === '/productos/precios') return 'productos_editar';
-  if (pathname.startsWith('/productos/paquetes')) return 'promociones';
   if (/^\/productos\/[^/]+\/editar$/.test(pathname)) return 'productos_editar';
   return undefined;
 }
@@ -154,62 +139,6 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [perfil, setPerfil] = useState<PerfilSesion | null>(null);
-  // Cantidad de pedidos web pendientes (número rojo en el menú), en tiempo real
-  const [pendientes, setPendientes] = useState(0);
-  // Cotizaciones nuevas (número celeste en el menú)
-  const [cotNuevas, setCotNuevas] = useState(0);
-
-  useEffect(() => {
-    if (!perfil) return;
-    let activo = true;
-    let espera: ReturnType<typeof setTimeout> | undefined;
-
-    async function contar() {
-      const { count } = await supabase
-        .from('pedidos')
-        .select('id', { count: 'exact', head: true })
-        .or('estado.is.null,estado.ilike.pendiente');
-      if (activo) setPendientes(count ?? 0);
-    }
-    // Las cotizaciones solo se cuentan si el rol puede verlas
-    const veCotizaciones = tienePermiso(perfil, 'cotizaciones');
-    async function contarCot() {
-      if (!veCotizaciones) return;
-      const { count } = await supabase
-        .from('cotizaciones')
-        .select('id', { count: 'exact', head: true })
-        .or('estado.is.null,estado.ilike.nueva');
-      if (activo) setCotNuevas(count ?? 0);
-    }
-    contar();
-    contarCot();
-
-    let esperaCot: ReturnType<typeof setTimeout> | undefined;
-    const canal = supabase
-      .channel('pedidos-menu')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
-        clearTimeout(espera);
-        espera = setTimeout(contar, 500);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cotizaciones' }, () => {
-        clearTimeout(esperaCot);
-        esperaCot = setTimeout(contarCot, 500);
-      })
-      .subscribe();
-
-    return () => {
-      activo = false;
-      clearTimeout(espera);
-      clearTimeout(esperaCot);
-      supabase.removeChannel(canal);
-    };
-  }, [perfil]);
-
-  // Modo defensa (universidad): oculta todo lo de la página web
-  const defensa = useDefensa();
-  const defensaManual = useDefensaManual();
-  const [avisoDefensa, setAvisoDefensa] = useState<string | null>(null);
-  const clicsVersion = useRef<number[]>([]);
   // Menú lateral en celular (en compu siempre está visible)
   const [menuAbierto, setMenuAbierto] = useState(false);
   // Se cierra con Escape o si la pantalla vuelve a ser de compu
@@ -227,39 +156,10 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     };
   }, [menuAbierto]);
 
-  function cambiarDefensa() {
-    const activo = alternarDefensa();
-    setAvisoDefensa(activo ? 'Modo presentación activado' : 'Modo presentación desactivado');
-    // La página se recarga sola para que todas las listas se vuelvan a leer (no hace falta F5)
-    setTimeout(() => window.location.reload(), 900);
-  }
-
-  // Atajo discreto: Ctrl + Alt + D (solo Super Administrador)
+  // Título de la pestaña del navegador
   useEffect(() => {
-    if (!perfil?.esSuper) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        cambiarDefensa();
-      }
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [perfil?.esSuper]);
-
-  // Si está activo, las pantallas de la web no se pueden abrir ni por dirección
-  useEffect(() => {
-    if (defensa && (pathname.startsWith('/pedidos') || pathname.startsWith('/cotizaciones'))) {
-      router.replace('/dashboard');
-    }
-  }, [defensa, pathname, router]);
-
-  // La pestaña del navegador también avisa: "(2) FerreStock"
-  useEffect(() => {
-    const base = perfil ? `${perfil.tienda.nombre_app} — Inventario` : document.title.replace(/^\(\d+\)\s*/, '');
-    const avisos = defensa ? 0 : pendientes + cotNuevas;
-    document.title = avisos > 0 ? `(${avisos}) ${base}` : base;
-  }, [pendientes, cotNuevas, pathname, defensa, perfil]);
+    if (perfil) document.title = `${perfil.tienda.nombre_app} — Inventario`;
+  }, [pathname, perfil]);
 
   useEffect(() => {
     let activo = true;
@@ -290,7 +190,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
       // Ferretería actual y a cuáles tiene acceso
       const [{ data: actualId }, { data: todas }, { data: mias }] = await Promise.all([
         supabase.rpc('mi_tienda'),
-        supabase.from('tiendas').select('id, slug, nombre, nombre_app, logo, color, es_principal, tiene_web').order('es_principal', { ascending: false }).order('nombre'),
+        supabase.from('tiendas').select('id, slug, nombre, nombre_app, logo, color, es_principal').order('es_principal', { ascending: false }).order('nombre'),
         supabase.from('usuario_tiendas').select('tienda_id').eq('user_id', authUser.id),
       ]);
       if (!activo) return;
@@ -308,10 +208,9 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           logo: '/logo-icono.png',
           color: '#1f7a3a',
           es_principal: true,
-          tiene_web: true,
         };
 
-      // Colores de la tienda y, si no tiene web, se ocultan las pantallas de la web
+      // Colores de la tienda
       document.documentElement.dataset.tienda = tienda.slug;
       // Ícono de la pestaña del navegador: el logo de la ferretería actual
       if (tienda.slug !== 'floreverde') {
@@ -326,7 +225,6 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           l.href = tienda.logo;
         });
       }
-      marcarTiendaSinWeb(!tienda.tiene_web);
 
       setPerfil({
         id: authUser.id,
@@ -386,12 +284,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
       {/* Temática de temporada (colores y adornos) */}
       <DecoracionTema tienda={perfil.tienda.slug} />
       {/* TEMPORAL: selector para probar las temáticas (solo Super Administrador) */}
-      {perfil.esSuper && !defensaManual && <ProbarTemas />}
-      {avisoDefensa && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full bg-black/80 text-white text-xs shadow-lg">
-          {avisoDefensa}
-        </div>
-      )}
+      {perfil.esSuper && <ProbarTemas />}
       <div className="flex min-h-screen font-sans text-text">
         {/* Fondo oscuro detrás del menú (solo celular) */}
         {menuAbierto && (
@@ -434,8 +327,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
                   item.section === section &&
                   (!item.permiso ||
                     tienePermiso(perfil, item.permiso) ||
-                    (!!item.permisoAlterno && tienePermiso(perfil, item.permisoAlterno))) &&
-                  !(defensa && (item.id === 'pedidos' || item.id === 'cotizaciones'))
+                    (!!item.permisoAlterno && tienePermiso(perfil, item.permisoAlterno)))
               );
               if (items.length === 0) return null;
               return (
@@ -462,22 +354,6 @@ function AdminShell({ children }: { children: React.ReactNode }) {
                         >
                           <item.icon size={18} />
                           <span className="flex-1 text-left">{item.label}</span>
-                          {item.id === 'pedidos' && pendientes > 0 && (
-                            <span
-                              className="min-w-5 h-5 px-1.5 rounded-full bg-danger text-white text-[11px] font-bold flex items-center justify-center animate-pulse"
-                              title={`${pendientes} pedido(s) pendiente(s)`}
-                            >
-                              {pendientes > 99 ? '99+' : pendientes}
-                            </span>
-                          )}
-                          {item.id === 'cotizaciones' && cotNuevas > 0 && (
-                            <span
-                              className="min-w-5 h-5 px-1.5 rounded-full bg-sky-600 text-white text-[11px] font-bold flex items-center justify-center"
-                              title={`${cotNuevas} cotización(es) nueva(s)`}
-                            >
-                              {cotNuevas > 99 ? '99+' : cotNuevas}
-                            </span>
-                          )}
                         </button>
                       );
                     })}
@@ -488,19 +364,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="p-4 border-t border-border text-center">
-            {/* 5 clics rápidos aquí = modo defensa (solo Super Administrador); no parece un botón */}
-            <span
-              className="text-[11px] text-text-muted select-none"
-              onClick={() => {
-                if (!perfil.esSuper) return;
-                const ahora = Date.now();
-                clicsVersion.current = [...clicsVersion.current.filter((t) => ahora - t < 2000), ahora];
-                if (clicsVersion.current.length >= 5) {
-                  clicsVersion.current = [];
-                  cambiarDefensa();
-                }
-              }}
-            >
+            <span className="text-[11px] text-text-muted select-none">
               v 2.4.1 · © 2026 {perfil.tienda.nombre_app}
             </span>
           </div>

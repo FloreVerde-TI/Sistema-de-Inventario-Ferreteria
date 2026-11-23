@@ -109,16 +109,8 @@ export default function RestablecerPage() {
     setLoading(true);
     setAviso(null);
     try {
-      const { data, error } = await supabase.auth.updateUser({ password });
+      const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
-
-      // Registro en la bitácora (el usuario lo completa la base de datos)
-      await supabase.from('actividad').insert({
-        accion: 'cambiar_contrasena',
-        entidad: 'usuario',
-        entidad_id: data.user.id,
-        detalle: 'Restableció su contraseña con el enlace del correo',
-      });
 
       // Cierra la sesión temporal: debe entrar con la contraseña nueva
       await supabase.auth.signOut();
@@ -158,14 +150,10 @@ export default function RestablecerPage() {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/logo-icono.png" alt="Flore Verde" className="w-full h-full object-contain p-1" />
               </div>
-              <div className="w-14 h-14 bg-black rounded-xl flex items-center justify-center overflow-hidden shadow">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/logo-ferrefuerte.png" alt="Ferre Fuerte" className="w-full h-full object-contain" />
-              </div>
             </div>
             <div>
               <p className="text-xl font-bold leading-tight">Sistema de Inventario</p>
-              <p className="text-sm text-white/75">Flore Verde · Ferre Fuerte</p>
+              <p className="text-sm text-white/75">Flore Verde SRL</p>
             </div>
           </div>
 

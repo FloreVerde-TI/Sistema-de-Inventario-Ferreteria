@@ -14,7 +14,6 @@ type RolFila = { nombre: string; nivel: number; es_super: boolean; permisos: str
 type PerfilFila = { full_name: string; role: string; activo: boolean; roles: RolFila | null };
 type Quien = {
   id: string;
-  etiqueta: string;
   nivel: number;
   esSuper: boolean;
   permisos: string[];
@@ -75,7 +74,6 @@ async function quienLlama(db: SupabaseClient, req: Request): Promise<Quien> {
 
   const q: Quien = {
     id: data.user.id,
-    etiqueta: `${p.full_name} — ${p.role}`,
     nivel: p.roles.nivel,
     esSuper: p.roles.es_super,
     permisos: p.roles.permisos,
@@ -148,18 +146,6 @@ function validarPassword(p: string) {
   }
 }
 
-async function bitacora(db: SupabaseClient, q: Quien, accion: string, id: string, detalle: string) {
-  await db.from('actividad').insert({
-    usuario_id: q.id,
-    usuario: q.etiqueta,
-    accion,
-    entidad: 'usuario',
-    entidad_id: id,
-    detalle,
-    tienda_id: q.tiendaActual || undefined, // la clave secreta no tiene "tienda actual": se indica aquí
-  });
-}
-
 function traducir(msg: string): string {
   const m = msg.toLowerCase();
   if (m.includes('already') && (m.includes('registered') || m.includes('exists'))) return 'Ya existe un usuario con ese correo.';
@@ -209,7 +195,6 @@ export async function POST(req: Request) {
           throw new ErrorUsuario(`El usuario se creó, pero no se pudieron asignar sus ferreterías (${(e as Error).message}). Edítalo con el lápiz.`);
         }
 
-        await bitacora(db, q, 'crear', data.user.id, `Creó el usuario ${nombre} (${email}) como ${rol.nombre}`);
         return NextResponse.json({ ok: true });
       }
 
@@ -244,28 +229,26 @@ export async function POST(req: Request) {
         if (rol && rol.nombre !== p.role) partes.push(`rol ${p.role} → ${rol.nombre}`);
         if (body.password) partes.push('cambió la contraseña');
         if (body.tiendas) partes.push('revisó sus ferreterías');
-        await bitacora(db, q, 'editar', body.id, partes.join(' · '));
         return NextResponse.json({ ok: true });
       }
 
       case 'activar':
       case 'desactivar': {
-        const p = await objetivo(db, q, body.id);
+        // Revisa que se pueda tocar a ese usuario (si no, lanza el error)
+        await objetivo(db, q, body.id);
         const activo = body.accion === 'activar';
         const { error: perfErr } = await db.from('profiles').update({ activo }).eq('id', body.id);
         if (perfErr) throw new ErrorUsuario(perfErr.message);
         // Bloquea (o desbloquea) el inicio de sesión en Auth
         const { error } = await db.auth.admin.updateUserById(body.id, { ban_duration: activo ? 'none' : '876000h' });
         if (error) throw new ErrorUsuario(error.message);
-        await bitacora(db, q, body.accion, body.id, `${activo ? 'Activó' : 'Desactivó'} a ${p.full_name}`);
         return NextResponse.json({ ok: true });
       }
 
       case 'eliminar': {
-        const p = await objetivo(db, q, body.id);
+        await objetivo(db, q, body.id);
         const { error } = await db.auth.admin.deleteUser(body.id);
         if (error) throw new ErrorUsuario(error.message);
-        await bitacora(db, q, 'eliminar', body.id, `Eliminó el usuario ${p.full_name} (${p.role})`);
         return NextResponse.json({ ok: true });
       }
 

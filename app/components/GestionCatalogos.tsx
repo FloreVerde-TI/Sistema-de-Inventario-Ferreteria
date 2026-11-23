@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
-import { registrarActividad } from '@/lib/actividad';
 import { usePerfil } from '@/components/AdminLayout';
 import { Tags, Truck, Trash2, Power, Loader2, X, Search, AlertTriangle } from 'lucide-react';
 import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
@@ -77,7 +76,6 @@ export default function GestionCatalogos() {
       setAviso({ tipo: 'error', texto: error?.message ?? 'No tienes permiso para habilitarlo.' });
       return;
     }
-    await registrarActividad({ accion: 'habilitar', entidad: tipo, entidad_id: item.id, detalle: `Habilitó ${tipo === 'categoria' ? 'la categoría' : 'el proveedor'} "${item.nombre}"` });
     setAviso({ tipo: 'exito', texto: `"${item.nombre}" vuelve a estar disponible.` });
     cargar();
   }
@@ -258,12 +256,6 @@ function EliminarModal({
       setOcupado(false);
       return;
     }
-    await registrarActividad({
-      accion: 'deshabilitar',
-      entidad: tipo,
-      entidad_id: item.id,
-      detalle: `Deshabilitó ${art} "${item.nombre}" (${productos.length} producto(s) asociados)`,
-    });
     onListo(`"${item.nombre}" quedó deshabilitado. Los productos lo conservan.`);
   }
 
@@ -283,7 +275,6 @@ function EliminarModal({
       setOcupado(false);
       return;
     }
-    await registrarActividad({ accion: 'eliminar', entidad: tipo, entidad_id: item.id, detalle: `Eliminó ${art} "${item.nombre}"` });
     onListo(`Se eliminó ${art} "${item.nombre}".`);
   }
 

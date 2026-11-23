@@ -5,15 +5,12 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
-import { registrarActividad } from '@/lib/actividad';
 import { traerTodo } from '@/lib/paginar';
 import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import SiPuede from '@/components/SiPuede';
 import ImportarProductos from '@/components/ImportarProductos';
 import { Product, Category } from '@/types';
 import { exportReport, type Column, type Format } from '@/lib/exportar';
-import { useDefensa, defensaActiva } from '@/lib/defensa';
-import { cargarPromosVigentes, etiquetaPromo, type PromoVigente } from '@/lib/promos';
 import {
   Plus,
   Search,
@@ -21,7 +18,6 @@ import {
   Edit,
   Trash2,
   Download,
-  Globe,
   Package,
   X,
   ChevronDown,
@@ -30,8 +26,6 @@ import {
   FileText,
   AlertTriangle,
   Check,
-  Percent,
-  Boxes,
 } from 'lucide-react';
 
 type ProductRow = { proveedor_id: string | null } & Pick<
@@ -43,7 +37,6 @@ type ProductRow = { proveedor_id: string | null } & Pick<
   | 'descripcion'
   | 'precio'
   | 'imagen_principal'
-  | 'activo'
   | 'categoria_id'
   | 'stock'
   | 'stock_minimo'
@@ -54,16 +47,6 @@ type CategoryRow = Pick<Category, 'id' | 'nombre'>;
 type ProveedorRow = { id: string; nombre: string };
 type StockStatus = 'normal' | 'low' | 'out';
 type StatusFilter = 'all' | StockStatus;
-type WebFilter = 'all' | 'web' | 'noweb';
-type PromoFilter = 'all' | 'promo' | 'paquete';
-// Paquete que descuenta de los productos existentes (no es un producto: se muestra como fila aparte)
-type PaqueteFila = {
-  id: string;
-  nombre: string;
-  precio: number;
-  en_web: boolean;
-  paquete_items: { producto_id: string; cantidad: number }[];
-};
 
 // Tarjeta blanca que se mantiene clara en modo oscuro (ver .card-light en globals.css)
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
@@ -97,7 +80,6 @@ type MovementRow = {
   cantidad: number;
   motivo: string | null;
   usuario: string | null;
-  origen: string | null;
   proveedor: string | null;
   referencia: string | null;
   observaciones: string | null;
@@ -112,14 +94,13 @@ async function fetchProductMovements(productId: ProductRow['id']): Promise<Movem
   for (let from = 0; ; from += MOV_PAGE_SIZE) {
     const { data, error } = await supabase
       .from('movimientos')
-      .select('tipo, cantidad, motivo, usuario, origen, proveedor, referencia, observaciones, created_at')
+      .select('tipo, cantidad, motivo, usuario, proveedor, referencia, observaciones, created_at')
       .eq('producto_id', productId)
       .order('created_at', { ascending: true })
       .range(from, from + MOV_PAGE_SIZE - 1);
     if (error) throw new Error(error.message);
     const chunk = (data ?? []) as MovementRow[];
-    // Modo defensa: sin movimientos de la página web
-    all.push(...(defensaActiva() ? chunk.filter((m) => m.origen !== 'web') : chunk));
+    all.push(...chunk);
     if (chunk.length < MOV_PAGE_SIZE) break;
   }
   return all;
@@ -138,7 +119,6 @@ const MOVEMENT_COLUMNS: Column<MovementRow>[] = [
   { key: 'proveedor', label: 'Proveedor', get: (m) => m.proveedor ?? '' },
   { key: 'referencia', label: 'Doc. referencia', get: (m) => m.referencia ?? '' },
   { key: 'usuario', label: 'Usuario', get: (m) => m.usuario ?? '' },
-  { key: 'origen', label: 'Origen', get: (m) => (m.origen === 'web' ? 'Web' : 'Panel') },
 ];
 
 function exportMovements(product: ProductRow, rows: MovementRow[], format: Format): Promise<void> {
@@ -146,7 +126,7 @@ function exportMovements(product: ProductRow, rows: MovementRow[], format: Forma
     {
       title: `Historial de movimientos - ${product.nombre}`,
       file: `movimientos_${fileSafe(product.sku || product.nombre)}`,
-      columns: defensaActiva() ? MOVEMENT_COLUMNS.filter((c) => c.key !== 'origen') : MOVEMENT_COLUMNS,
+      columns: MOVEMENT_COLUMNS,
       rows,
       summary: [`Código: ${product.sku ?? '-'}`, `Stock actual: ${product.stock ?? 0}`, `Movimientos: ${rows.length}`],
     },
@@ -154,7 +134,7 @@ function exportMovements(product: ProductRow, rows: MovementRow[], format: Forma
   );
 }
 
-type ProductExportRow = ProductRow & { categoria: string; proveedor: string; promo: PromoVigente | null; esPaquete: boolean };
+type ProductExportRow = ProductRow & { categoria: string; proveedor: string };
 
 const PRODUCT_COLUMNS: Column<ProductExportRow>[] = [
   { key: 'sku', label: 'Código', get: (p) => p.sku ?? '' },
@@ -164,12 +144,6 @@ const PRODUCT_COLUMNS: Column<ProductExportRow>[] = [
   { key: 'proveedor', label: 'Proveedor', get: (p) => p.proveedor },
   { key: 'marca', label: 'Marca', get: (p) => p.marca ?? '' },
   { key: 'precio', label: 'Precio', get: (p) => p.precio ?? 0, right: true, money: true },
-  { key: 'precio_promo', label: 'Precio con promoción', get: (p) => p.promo?.precio_final ?? p.precio ?? 0, right: true, money: true },
-  {
-    key: 'promo',
-    label: 'Promoción',
-    get: (p) => [p.promo ? etiquetaPromo(p.promo) : '', p.esPaquete ? 'PAQUETE' : ''].filter(Boolean).join(' · '),
-  },
   { key: 'stock', label: 'Stock', get: (p) => p.stock ?? 0, right: true },
   { key: 'minimo', label: 'Mín.', get: (p) => p.stock_minimo ?? 0, right: true },
   { key: 'ubicacion', label: 'Ubicación', get: (p) => p.ubicacion ?? '' },
@@ -178,7 +152,6 @@ const PRODUCT_COLUMNS: Column<ProductExportRow>[] = [
     label: 'Estado',
     get: (p) => (p.habilitado === false ? 'Deshabilitado' : STATUS_LABEL[getStatus(p.stock, p.stock_minimo)]),
   },
-  { key: 'web', label: 'En web', get: (p) => (p.activo ? 'Sí' : 'No') },
   { key: 'descripcion', label: 'Descripción', get: (p) => p.descripcion ?? '', maxChars: 100 },
   { key: 'imagen', label: 'URL de imagen', get: (p) => p.imagen_principal ?? '', maxChars: 40 },
 ];
@@ -219,21 +192,12 @@ function ProductosContenido() {
       setSearchTerm('');
       setFilterCategory('all');
       setFilterStatus('all');
-      setFilterWeb('all');
-      setFilterPromo('all');
       setVerDeshabilitados(false);
       setNotice(null);
     };
   }, []);
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
-  const [filterWeb, setFilterWeb] = useState<WebFilter>('all');
-  const [filterPromo, setFilterPromo] = useState<PromoFilter>('all');
-  // Promociones vigentes (producto → mejor promoción) y productos que son paquete
-  const [promos, setPromos] = useState<Map<string, PromoVigente>>(new Map());
-  const [paquetesPropios, setPaquetesPropios] = useState<Set<string>>(new Set());
-  const [paquetesComp, setPaquetesComp] = useState<PaqueteFila[]>([]);
-  const defensa = useDefensa(); // modo defensa: sin nada de la página web
   const [verDeshabilitados, setVerDeshabilitados] = useState(false);
   const [importando, setImportando] = useState(false);
   const [recarga, setRecarga] = useState(0); // al cambiar, vuelve a cargar la lista
@@ -253,13 +217,13 @@ function ProductosContenido() {
 
   useEffect(() => {
     async function fetchData() {
-      const [catRes, prodRes, provRes, codRes, promoRes, paqRes] = await Promise.all([
+      const [catRes, prodRes, provRes, codRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
         traerTodo((a, b) =>
           supabase
             .from('productos')
             .select(
-              'id, sku, codigo_barras, nombre, descripcion, precio, imagen_principal, activo, categoria_id, stock, stock_minimo, ubicacion, habilitado, proveedor_id, marca'
+              'id, sku, codigo_barras, nombre, descripcion, precio, imagen_principal, categoria_id, stock, stock_minimo, ubicacion, habilitado, proveedor_id, marca'
             )
             .order('nombre')
             .order('id')
@@ -269,13 +233,7 @@ function ProductosContenido() {
         traerTodo<{ producto_id: string; codigo: string }>((a, b) =>
           supabase.from('codigos_barras').select('producto_id, codigo').order('id').range(a, b)
         ),
-        cargarPromosVigentes(),
-        supabase.from('paquetes').select('id, nombre, precio, en_web, modo, producto_id, paquete_items(producto_id, cantidad)').eq('activo', true),
       ]);
-      setPromos(promoRes);
-      const paqs = (paqRes.data ?? []) as (PaqueteFila & { modo: string; producto_id: string | null })[];
-      setPaquetesPropios(new Set(paqs.filter((x) => x.producto_id).map((x) => x.producto_id as string)));
-      setPaquetesComp(paqs.filter((x) => x.modo === 'componentes'));
 
       const failed = catRes.error ?? prodRes.error;
       if (failed) {
@@ -294,8 +252,8 @@ function ProductosContenido() {
     fetchData();
   }, [recarga]);
 
-  // Tiempo real: si cambia un producto, entra un movimiento (entrada, salida, venta web)
-  // o cambia un pedido (rechazo = devuelve stock), la lista se vuelve a leer sola,
+  // Tiempo real: si cambia un producto o entra un movimiento (entrada o salida),
+  // la lista se vuelve a leer sola,
   // sin parpadear (con una pequeña espera por si llegan varios cambios juntos).
   useEffect(() => {
     let espera: ReturnType<typeof setTimeout> | undefined;
@@ -307,7 +265,6 @@ function ProductosContenido() {
       .channel(`productos-lista-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, refrescar)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'movimientos' }, refrescar)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, refrescar)
       .subscribe((estado) => {
         if (estado !== 'SUBSCRIBED') console.warn('Tiempo real de productos:', estado);
       });
@@ -331,24 +288,11 @@ function ProductosContenido() {
       const matchesCategory = filterCategory === 'all' || p.categoria_id === filterCategory;
       const matchesStatus =
         filterStatus === 'all' || getStatus(p.stock, p.stock_minimo) === filterStatus;
-      const matchesWeb =
-        filterWeb === 'all' || (filterWeb === 'web' ? p.activo === true : p.activo !== true);
       // Los deshabilitados se ocultan, salvo que se marque la casilla o se esté buscando
       const matchesHabilitado = p.habilitado !== false || verDeshabilitados || !!term;
-      const matchesPromo =
-        filterPromo === 'all' || (filterPromo === 'promo' ? promos.has(p.id) : paquetesPropios.has(p.id));
-      return matchesSearch && matchesCategory && matchesStatus && matchesWeb && matchesHabilitado && matchesPromo;
+      return matchesSearch && matchesCategory && matchesStatus && matchesHabilitado;
     });
-  }, [products, codigosExtra, searchTerm, filterCategory, filterStatus, filterWeb, filterPromo, promos, paquetesPropios, verDeshabilitados]);
-  const paquetesVisibles = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (filterPromo === 'promo' || filterCategory !== 'all' || filterStatus !== 'all') return [];
-    return paquetesComp.filter(
-      (q) =>
-        (!term || q.nombre.toLowerCase().includes(term)) &&
-        (filterWeb === 'all' || (filterWeb === 'web' ? q.en_web : !q.en_web))
-    );
-  }, [paquetesComp, searchTerm, filterPromo, filterCategory, filterStatus, filterWeb]);
+  }, [products, codigosExtra, searchTerm, filterCategory, filterStatus, verDeshabilitados]);
   const totalDeshabilitados = useMemo(() => products.filter((p) => p.habilitado === false).length, [products]);
 
   async function handleExport(format: Format) {
@@ -362,15 +306,13 @@ function ProductosContenido() {
       ...p,
       categoria: (p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría',
       proveedor: (p.proveedor_id && proveedorName.get(p.proveedor_id)) || '',
-      promo: promos.get(p.id) ?? null,
-      esPaquete: paquetesPropios.has(p.id),
     }));
     try {
       await exportReport(
         {
           title: 'Listado de productos',
           file: 'productos',
-          columns: defensa ? PRODUCT_COLUMNS.filter((c) => c.key !== 'web') : PRODUCT_COLUMNS,
+          columns: PRODUCT_COLUMNS,
           rows,
           summary: [`Productos: ${rows.length}`],
         },
@@ -389,7 +331,7 @@ function ProductosContenido() {
   }
 
   function handleDisabled(p: ProductRow) {
-    setProducts((prev) => prev.map((x) => (x.id === p.id ? { ...x, habilitado: false, activo: false } : x)));
+    setProducts((prev) => prev.map((x) => (x.id === p.id ? { ...x, habilitado: false } : x)));
     setDeleteTarget(null);
     setNotice(`El producto «${p.nombre}» quedó deshabilitado.`);
   }
@@ -445,22 +387,6 @@ function ProductosContenido() {
               >
                 <FileUp size={16} /> Importar Excel
               </button>
-            </SiPuede>
-            <SiPuede permiso="productos_editar">
-              <Link
-                href="/productos/precios"
-                className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2"
-              >
-                <Percent size={16} /> Actualizar precios
-              </Link>
-            </SiPuede>
-            <SiPuede permiso="promociones">
-              <Link
-                href="/productos/paquetes"
-                className="card-light px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center gap-2"
-              >
-                <Boxes size={16} /> Paquetes
-              </Link>
             </SiPuede>
             <SiPuede permiso="productos_crear">
               <Link
@@ -521,20 +447,6 @@ function ProductosContenido() {
             <option value="out">Agotado</option>
           </select>
 
-          {!defensa && (
-            <select className={FIELD} value={filterWeb} onChange={(e) => setFilterWeb(e.target.value as WebFilter)}>
-              <option value="all">Todos</option>
-              <option value="web">En Web</option>
-              <option value="noweb">No en Web</option>
-            </select>
-          )}
-
-          <select className={FIELD} value={filterPromo} onChange={(e) => setFilterPromo(e.target.value as PromoFilter)}>
-            <option value="all">Con y sin promoción</option>
-            <option value="promo">En oferta o descuento</option>
-            <option value="paquete">Paquetes</option>
-          </select>
-
           <label className="flex items-center gap-2 text-sm text-text cursor-pointer whitespace-nowrap">
             <input
               type="checkbox"
@@ -568,63 +480,7 @@ function ProductosContenido() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {paquetesVisibles.map((q) => {
-                    const normal = q.paquete_items.reduce(
-                      (t, i) => t + Number(products.find((x) => x.id === i.producto_id)?.precio ?? 0) * i.cantidad,
-                      0
-                    );
-                    const disponibles = Math.min(
-                      ...q.paquete_items.map((i) => {
-                        const x = products.find((y) => y.id === i.producto_id);
-                        return x && x.habilitado !== false ? Math.floor(Math.max(x.stock ?? 0, 0) / i.cantidad) : 0;
-                      })
-                    );
-                    return (
-                      <tr key={`paq-${q.id}`} className="hover:bg-surface-alt transition-colors bg-info-soft/30">
-                        <td className={`${TD} font-bold text-text`}>—</td>
-                        <td className={`${TD} text-text-muted`}>—</td>
-                        <td className={`${TD} font-medium text-text`}>
-                          {q.nombre}
-                          <span className="block text-xs text-text-muted">
-                            {q.paquete_items
-                              .map((i) => `${i.cantidad > 1 ? `${i.cantidad}× ` : ''}${products.find((x) => x.id === i.producto_id)?.nombre ?? '—'}`)
-                              .join(' + ')}
-                          </span>
-                        </td>
-                        <td className={`${TD} text-text-soft`}>Paquete</td>
-                        <td className={`${TD} text-right whitespace-nowrap`}>
-                          <span className="inline-flex flex-col items-end leading-tight">
-                            <span className="text-[11px] text-text-muted line-through">{formatPrice(normal)}</span>
-                            <span className="font-semibold text-danger">{formatPrice(Number(q.precio))}</span>
-                          </span>
-                        </td>
-                        <td className={`${TD} text-right font-semibold text-text`} title="Paquetes que alcanzan con el stock de hoy">
-                          {disponibles}
-                        </td>
-                        <td className={`${TD} text-right text-text-muted`}>—</td>
-                        <td className={`${TD} text-text-soft`}>—</td>
-                        <td className={TD}>
-                          <div className="flex flex-col items-start gap-1">
-                            <PaqueteBadge />
-                            {q.en_web && !defensa && <WebBadge />}
-                          </div>
-                        </td>
-                        <td className={TD}>
-                          <div className="flex justify-end gap-1">
-                            <Link href={`/productos/paquetes?ver=${q.id}`} title="Ver" className={ICON_BTN}>
-                              <Eye size={16} />
-                            </Link>
-                            <SiPuede permiso="promociones">
-                              <Link href={`/productos/paquetes?editar=${q.id}`} title="Editar" className={ICON_BTN}>
-                                <Edit size={16} />
-                              </Link>
-                            </SiPuede>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {filteredProducts.length > 0 || paquetesVisibles.length > 0 ? (
+                  {filteredProducts.length > 0 ? (
                     filteredProducts.map((p) => (
                       <tr
                         key={p.id}
@@ -645,7 +501,7 @@ function ProductosContenido() {
                           {(p.categoria_id && categoryName.get(p.categoria_id)) || 'Sin categoría'}
                         </td>
                         <td className={`${TD} text-right whitespace-nowrap`}>
-                          <Precio normal={p.precio} promo={promos.get(p.id)} />
+                          <span className="text-text">{formatPrice(p.precio)}</span>
                         </td>
                         <td className={`${TD} text-right font-semibold text-text`}>{p.stock ?? 0}</td>
                         <td className={`${TD} text-right text-text-muted`}>{p.stock_minimo ?? 0}</td>
@@ -655,12 +511,7 @@ function ProductosContenido() {
                             {p.habilitado === false ? (
                               <DisabledBadge />
                             ) : (
-                              <>
-                                <StatusBadge status={getStatus(p.stock, p.stock_minimo)} />
-                                {p.activo && !defensa && <WebBadge />}
-                                {promos.get(p.id) && <PromoBadge promo={promos.get(p.id)!} />}
-                                {paquetesPropios.has(p.id) && <PaqueteBadge />}
-                              </>
+                              <StatusBadge status={getStatus(p.stock, p.stock_minimo)} />
                             )}
                           </div>
                         </td>
@@ -718,7 +569,6 @@ function ProductosContenido() {
           categoria={(selected.categoria_id && categoryName.get(selected.categoria_id)) || 'Sin categoría'}
           proveedor={(selected.proveedor_id && proveedorName.get(selected.proveedor_id)) || '—'}
           codigosExtra={codigosExtra.get(String(selected.id)) ?? []}
-          promo={promos.get(selected.id) ?? null}
           onClose={() => setSelected(null)}
         />
       )}
@@ -767,46 +617,6 @@ function DisabledBadge() {
   );
 }
 
-function WebBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-primary-soft text-primary-ink badge-web">
-      {/* Cambia con la temática; en Halloween se ajusta en globals.css para no confundirse con Stock bajo */}
-      <Globe size={10} />
-      En web
-    </span>
-  );
-}
-
-/** Precio normal; si hay promoción, el normal tachado y el de promoción en rojo. */
-function Precio({ normal, promo }: { normal?: number | null; promo?: PromoVigente }) {
-  if (!promo) return <span className="text-text">{formatPrice(normal)}</span>;
-  return (
-    <span className="inline-flex flex-col items-end leading-tight">
-      <span className="text-[11px] text-text-muted line-through">{formatPrice(normal)}</span>
-      <span className="font-semibold text-danger">{formatPrice(promo.precio_final)}</span>
-    </span>
-  );
-}
-
-/** Solo para promociones reales (no para cambios de precio por proveedor). */
-function PromoBadge({ promo }: { promo: PromoVigente }) {
-  return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-danger-soft text-red-800 whitespace-nowrap">
-      <Percent size={10} />
-      {etiquetaPromo(promo)}
-    </span>
-  );
-}
-
-function PaqueteBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-info-soft text-sky-800">
-      <Boxes size={10} />
-      Paquete
-    </span>
-  );
-}
-
 function DetailItem({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
@@ -821,40 +631,17 @@ function ProductDetailModal({
   categoria,
   proveedor,
   codigosExtra,
-  promo,
   onClose,
 }: {
   product: ProductRow;
   categoria: string;
   proveedor: string;
   codigosExtra: string[];
-  promo: PromoVigente | null;
   onClose: () => void;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
   const imageUrl = product.imagen_principal?.trim() ?? '';
   const showImage = imageUrl !== '' && !imgFailed;
-  // Historial de precios (últimos 10 cambios)
-  const [historial, setHistorial] = useState<
-    { id: string; precio_anterior: number | null; precio_nuevo: number | null; usuario: string | null; creado_en: string }[] | null
-  >(null);
-
-  useEffect(() => {
-    let activo = true;
-    supabase
-      .from('historial_precios')
-      .select('id, precio_anterior, precio_nuevo, usuario, creado_en')
-      .eq('producto_id', product.id)
-      .order('creado_en', { ascending: false })
-      .limit(10)
-      .then(({ data }) => {
-        if (activo) setHistorial(data ?? []);
-      });
-    return () => {
-      activo = false;
-    };
-  }, [product.id]);
-
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -881,11 +668,7 @@ function ProductDetailModal({
               {product.habilitado === false ? (
                 <DisabledBadge />
               ) : (
-                <>
-                  <StatusBadge status={getStatus(product.stock, product.stock_minimo)} />
-                  {product.activo && !defensaActiva() && <WebBadge />}
-                  {promo && <PromoBadge promo={promo} />}
-                </>
+                <StatusBadge status={getStatus(product.stock, product.stock_minimo)} />
               )}
             </div>
           </div>
@@ -914,7 +697,7 @@ function ProductDetailModal({
 
           <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <DetailItem label="Categoría" value={categoria} />
-            <DetailItem label="Precio" value={<Precio normal={product.precio} promo={promo ?? undefined} />} />
+            <DetailItem label="Precio" value={formatPrice(product.precio)} />
             <DetailItem label="Código (SKU)" value={product.sku || '—'} />
             <DetailItem label="Código de barras" value={product.codigo_barras || '—'} />
             {codigosExtra.length > 0 && (
@@ -936,32 +719,6 @@ function ProductDetailModal({
             <DetailItem label="URL de la imagen" value={imageUrl || '—'} />
           </div>
 
-          <div className="sm:col-span-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-text-soft mb-1.5">Historial de precios</p>
-            {historial === null ? (
-              <p className="text-sm text-text-muted italic">Cargando…</p>
-            ) : historial.length === 0 ? (
-              <p className="text-sm text-text-muted">Sin cambios de precio registrados.</p>
-            ) : (
-              <ul className="border border-border rounded-lg divide-y divide-border text-sm max-h-48 overflow-y-auto">
-                {historial.map((h) => {
-                  const sube = (h.precio_nuevo ?? 0) > (h.precio_anterior ?? 0);
-                  return (
-                    <li key={h.id} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-text">
-                        {formatPrice(h.precio_anterior)} →{' '}
-                        <strong className={sube ? 'text-success' : 'text-danger'}>{formatPrice(h.precio_nuevo)}</strong>
-                      </span>
-                      <span className="text-xs text-text-muted">
-                        {h.usuario || '—'} ·{' '}
-                        {new Date(h.creado_en).toLocaleString('es-CR', { dateStyle: 'short', timeStyle: 'short' })}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
         </div>
 
         <div className="p-6 border-t border-border flex justify-end gap-3">
@@ -1001,24 +758,7 @@ function DeleteProductModal({
   const [exportedMsg, setExportedMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [blocked, setBlocked] = useState(false);
-  const [enPedidos, setEnPedidos] = useState<number | null>(null); // null = revisando
   const alreadyDisabled = product.habilitado === false;
-
-  // ¿Aparece en pedidos web? Si sí, no se puede borrar (se perdería el historial de esos pedidos)
-  useEffect(() => {
-    let cancelado = false;
-    supabase
-      .from('detalle_pedido')
-      .select('id', { count: 'exact', head: true })
-      .eq('producto_id', product.id)
-      .then(({ count }) => {
-        if (!cancelado) setEnPedidos(count ?? 0);
-      });
-    return () => {
-      cancelado = true;
-    };
-  }, [product.id]);
-  const conPedidos = (enPedidos ?? 0) > 0;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -1058,7 +798,7 @@ function DeleteProductModal({
     setBusy(null);
 
     if (delError) {
-      // 23503 = la base no deja borrar porque hay pedidos web (detalle_pedido)
+      // 23503 = la base no deja borrar porque otros registros dependen del producto
       if (delError.code === '23503') setBlocked(true);
       else setError(delError.message);
       return;
@@ -1068,12 +808,6 @@ function DeleteProductModal({
       return;
     }
     await borrarImagenSiEsNuestra(product.imagen_principal);
-    await registrarActividad({
-      accion: 'eliminar',
-      entidad: 'producto',
-      entidad_id: product.id,
-      detalle: `Eliminó el producto "${product.nombre}"${product.sku ? ` (${product.sku})` : ''}`,
-    });
     onDeleted(product);
   }
 
@@ -1082,7 +816,7 @@ function DeleteProductModal({
     setBusy('disable');
     const { data, error: updError } = await supabase
       .from('productos')
-      .update({ habilitado: false, activo: false })
+      .update({ habilitado: false })
       .eq('id', product.id)
       .select('id');
     setBusy(null);
@@ -1095,12 +829,6 @@ function DeleteProductModal({
       setError('La base no deshabilitó el producto. Revisa los permisos (RLS).');
       return;
     }
-    await registrarActividad({
-      accion: 'deshabilitar',
-      entidad: 'producto',
-      entidad_id: product.id,
-      detalle: `Deshabilitó el producto "${product.nombre}"`,
-    });
     onDisabled(product);
   }
 
@@ -1125,20 +853,9 @@ function DeleteProductModal({
         </div>
 
         <div className="p-6 space-y-4">
-          {enPedidos === null ? (
-            <p className="text-sm text-text-muted italic">Revisando si el producto tiene ventas registradas...</p>
-          ) : conPedidos ? (
-            <div className="bg-info-soft text-sky-900 border border-sky-200 rounded-lg p-3 text-sm">
-              Este producto aparece en <strong>{enPedidos}</strong>{' '}
-              {defensaActiva() ? (enPedidos === 1 ? 'venta registrada' : 'ventas registradas') : enPedidos === 1 ? 'pedido web' : 'pedidos web'}, así que
-              no se puede borrar: se perdería el historial de esos pedidos. Puedes <strong>deshabilitarlo</strong>: deja de
-              usarse en Entradas y Salidas{defensaActiva() ? '' : ' y la web'}, pero se conserva todo.
-            </div>
-          ) : (
-            <p className="text-sm text-text-soft">
-              Borrar elimina el producto y todo su historial de movimientos. No se puede deshacer.
-            </p>
-          )}
+          <p className="text-sm text-text-soft">
+            Borrar elimina el producto y todo su historial de movimientos. No se puede deshacer.
+          </p>
 
           {error && (
             <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-3 text-sm">{error}</div>
@@ -1146,13 +863,11 @@ function DeleteProductModal({
 
           {blocked && (
             <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-3 text-sm">
-              No se puede borrar: este producto tiene {defensaActiva() ? 'ventas registradas' : 'pedidos web asociados'}. Puedes deshabilitarlo para que no se use
+              No se puede borrar: este producto tiene registros asociados. Puedes deshabilitarlo para que no se use
               más.
             </div>
           )}
 
-          {enPedidos !== null && !conPedidos && (
-          <>
           <div className={STEP}>
             <p className="text-sm font-semibold text-text mb-3">1. Exporta el historial de movimientos</p>
             <div className="flex gap-3">
@@ -1183,14 +898,12 @@ function DeleteProductModal({
             </button>
             {!exportedMsg && <p className="text-xs text-text-muted mt-2">Primero debes exportar el historial.</p>}
           </div>
-          </>
-          )}
 
           <SiPuede permiso="productos_deshabilitar">
           <div className={STEP}>
             <p className="text-sm font-semibold text-text mb-1">¿Prefieres conservarlo?</p>
             <p className="text-xs text-text-muted mb-3">
-              Deshabilitar lo oculta {defensaActiva() ? '' : 'de la web y '}de Entradas y Salidas, pero guarda todo su historial.
+              Deshabilitar lo oculta de Entradas y Salidas, pero guarda todo su historial.
             </p>
             <button
               type="button"

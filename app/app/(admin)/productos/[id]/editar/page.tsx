@@ -5,17 +5,14 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
-import { registrarActividad } from '@/lib/actividad';
 import SiPuede from '@/components/SiPuede';
 import SubirImagen from '@/components/SubirImagen';
-import { useDefensa } from '@/lib/defensa';
 import CodigosAdicionales from '@/components/CodigosAdicionales';
 import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import ElegirPlantilla from '@/components/ElegirPlantilla';
-import PromoProducto from '@/components/PromoProducto';
 import { imagenPredeterminada } from '@/lib/plantillas';
 import { Product, Category } from '@/types';
-import { Save, X, Loader2, Package, Globe, CheckCircle2, Power } from 'lucide-react';
+import { Save, X, Loader2, Package, CheckCircle2, Power } from 'lucide-react';
 
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
 type ProveedorRow = { id: string; nombre: string };
@@ -32,7 +29,6 @@ type ProductRow = { proveedor_id: string | null } & Pick<
   | 'stock_minimo'
   | 'ubicacion'
   | 'imagen_principal'
-  | 'activo'
   | 'habilitado'
 > & { marca: string | null };
 
@@ -50,7 +46,6 @@ interface FormState {
   stock_minimo: string;
   ubicacion: string;
   imagen: string;
-  enWeb: boolean;
   habilitado: boolean;
 }
 
@@ -58,7 +53,7 @@ const NEW_CATEGORY = '__nueva__';
 const NEW_PROVEEDOR = '__nuevo_proveedor__';
 
 const PRODUCT_FIELDS =
-  'id, nombre, descripcion, categoria_id, precio, sku, codigo_barras, stock, stock_minimo, ubicacion, imagen_principal, activo, habilitado, proveedor_id, marca';
+  'id, nombre, descripcion, categoria_id, precio, sku, codigo_barras, stock, stock_minimo, ubicacion, imagen_principal, habilitado, proveedor_id, marca';
 
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
 const FIELD =
@@ -94,7 +89,6 @@ function toForm(p: ProductRow): FormState {
     stock_minimo: String(p.stock_minimo ?? 0),
     ubicacion: p.ubicacion ?? '',
     imagen: p.imagen_principal ?? '',
-    enWeb: p.activo === true,
     habilitado: p.habilitado !== false,
   };
 }
@@ -119,7 +113,6 @@ function CloseButton({ onClick }: { onClick: () => void }) {
 
 function EditarProductoForm() {
   const { id } = useParams<{ id: string }>();
-  const defensa = useDefensa();
 
   const [form, setForm] = useState<FormState | null>(null);
   const [stock, setStock] = useState(0);
@@ -285,7 +278,6 @@ function EditarProductoForm() {
       }
 
       // 3. Actualizar (el stock NO se toca: cambia solo con Entradas/Salidas)
-      const visibleEnWeb = form.habilitado && form.enWeb;
       // Sin imagen: plantilla al azar de su categoría o, si no hay, el logo de la ferretería
       const nombreCat = creatingCategory ? nuevaCat : categories.find((c) => c.id === categoriaId)?.nombre;
       const imagenNueva = form.imagen.trim() || (await imagenPredeterminada(nombreCat)) || '';
@@ -303,7 +295,6 @@ function EditarProductoForm() {
           stock_minimo: minimo,
           ubicacion: form.ubicacion.trim() || null,
           imagen_principal: imagenNueva || null,
-          activo: visibleEnWeb,
           habilitado: form.habilitado,
         })
         .eq('id', id);
@@ -315,26 +306,13 @@ function EditarProductoForm() {
       }
       setImagenOriginal(imagenNueva);
 
-      // Bitácora: edición y, si cambió, habilitar / deshabilitar
-      await registrarActividad({
-        accion: 'editar',
-        entidad: 'producto',
-        entidad_id: id,
-        detalle: `Editó el producto "${nombre}"`,
-      });
       if (form.habilitado !== habilitadoOriginal) {
-        await registrarActividad({
-          accion: form.habilitado ? 'habilitar' : 'deshabilitar',
-          entidad: 'producto',
-          entidad_id: id,
-          detalle: `${form.habilitado ? 'Habilitó' : 'Deshabilitó'} el producto "${nombre}"`,
-        });
         setHabilitadoOriginal(form.habilitado);
       }
 
       setForm((prev) =>
         prev
-          ? { ...prev, categoria: categoriaId, nuevaCategoria: '', proveedor: proveedorId ?? '', nuevoProveedor: '', enWeb: visibleEnWeb, imagen: imagenNueva }
+          ? { ...prev, categoria: categoriaId, nuevaCategoria: '', proveedor: proveedorId ?? '', nuevoProveedor: '', imagen: imagenNueva }
           : prev
       );
       setSuccess(`Producto "${nombre}" actualizado correctamente.`);
@@ -522,7 +500,6 @@ function EditarProductoForm() {
                   <label className={LABEL}>Códigos de barras adicionales</label>
                   <CodigosAdicionales
                     productoId={id}
-                    nombreProducto={form.nombre.trim()}
                     codigoPrincipal={form.codigo_barras}
                   />
                 </div>
@@ -533,7 +510,7 @@ function EditarProductoForm() {
                     className={`${FIELD} h-24 resize-none`}
                     value={form.descripcion}
                     onChange={(e) => set('descripcion', e.target.value)}
-                    placeholder="Detalles del producto (se muestra también en la web)"
+                    placeholder="Detalles del producto"
                   />
                 </div>
               </div>
@@ -646,7 +623,7 @@ function EditarProductoForm() {
             </div>
 
             <div className={`${CARD} p-6 space-y-5`}>
-              <SectionTitle>{defensa ? 'Estado' : 'Estado y publicación'}</SectionTitle>
+              <SectionTitle>Estado</SectionTitle>
 
               {/* Solo quien puede deshabilitar ve este interruptor */}
               <SiPuede permiso="productos_deshabilitar">
@@ -655,47 +632,20 @@ function EditarProductoForm() {
                   type="checkbox"
                   className="mt-1 h-4 w-4 accent-primary"
                   checked={form.habilitado}
-                  onChange={(e) => {
-                    set('habilitado', e.target.checked);
-                    if (!e.target.checked) set('enWeb', false);
-                  }}
+                  onChange={(e) => set('habilitado', e.target.checked)}
                 />
                 <span>
                   <span className="flex items-center gap-2 text-sm font-semibold text-text">
                     <Power size={16} /> Producto habilitado
                   </span>
                   <span className="block text-xs text-text-muted mt-0.5">
-                    Si lo deshabilitas, no se podrá usar en Entradas{defensa ? ' ni Salidas' : ', Salidas ni en la web'}.
+                    Si lo deshabilitas, no se podrá usar en Entradas ni Salidas.
                   </span>
                 </span>
               </label>
               </SiPuede>
 
-              {/* Modo defensa: se oculta la publicación en la web */}
-              {!defensa && (
-              <label className={`flex items-start gap-3 ${form.habilitado ? 'cursor-pointer' : 'opacity-50'}`}>
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 accent-primary"
-                  checked={form.enWeb}
-                  disabled={!form.habilitado}
-                  onChange={(e) => set('enWeb', e.target.checked)}
-                />
-                <span>
-                  <span className="flex items-center gap-2 text-sm font-semibold text-text">
-                    <Globe size={16} /> Disponible en la web
-                  </span>
-                  <span className="block text-xs text-text-muted mt-0.5">
-                    Si está activo, el producto aparece en la página promocional.
-                  </span>
-                </span>
-              </label>
-              )}
             </div>
-
-            <SiPuede permiso="promociones">
-              <PromoProducto productoId={id} nombre={form.nombre.trim()} precio={Number(form.precio) || 0} defensa={defensa} />
-            </SiPuede>
 
             <button
               type="submit"

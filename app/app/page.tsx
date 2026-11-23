@@ -25,10 +25,6 @@ export default function RootPage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo-icono.png" alt="" className="w-full h-full object-contain p-1.5" />
           </div>
-          <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center overflow-hidden shadow-lg">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo-ferrefuerte.png" alt="" className="w-full h-full object-contain" />
-          </div>
         </div>
         <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin" />
         <p className="text-white/90 text-sm font-medium">Cargando el sistema...</p>

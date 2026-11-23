@@ -47,9 +47,7 @@ export interface Product {
   descripcion: string;
   precio: number;
   imagen_principal: string;
-  /** "En web" */
-  activo: boolean;
-  /** false = deshabilitado (no se usa en Entradas, Salidas ni en la web) */
+  /** false = deshabilitado (no se usa en Entradas ni Salidas) */
   habilitado: boolean;
   sku?: string | null;
   codigo_barras?: string | null;
@@ -60,19 +58,7 @@ export interface Product {
   updated_at: string;
 }
 
-// Tabla "movements": solo recibe los movimientos de pedidos web
-export interface Movement {
-  id: string;
-  product_id: string;
-  user_id: string;
-  type: 'Entrada' | 'Salida' | 'Ajuste';
-  quantity: number;
-  reference: string;
-  observations: string;
-  created_at: string;
-}
-
-// Tabla "movimientos": registro unificado (panel + pedidos web)
+// Tabla "movimientos": entradas y salidas de inventario
 export interface Movimiento {
   id: string;
   producto_id: string;
@@ -83,7 +69,6 @@ export interface Movimiento {
   referencia?: string | null;
   /** "Nombre — Rol" */
   usuario: string | null;
-  origen: 'panel' | 'web';
   /** Nota opcional del movimiento */
   observaciones?: string | null;
   created_at: string;
@@ -104,16 +89,4 @@ export interface Setting {
   logo_url: string | null;
   pie_reportes: string | null;
   updated_at: string;
-}
-
-export interface Actividad {
-  id: number;
-  usuario_id: string | null;
-  /** "Nombre — Rol" */
-  usuario: string | null;
-  accion: string;
-  entidad: 'producto' | 'pedido' | 'usuario' | 'rol' | 'configuracion';
-  entidad_id: string | null;
-  detalle: string | null;
-  created_at: string;
 }

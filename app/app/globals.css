@@ -340,12 +340,6 @@
   --sidebar-gradient: linear-gradient(180deg, #0f0b1e 0%, #0b0816 60%, #1a1530 100%);
 }
 
-/* Halloween: "En web" en morado (el naranja chocaba con "Stock bajo") */
-[data-tema="halloween"] .badge-web {
-  background-color: #ede9fe;
-  color: #5b21b6;
-}
-
 /* Con temática, las tarjetas grandes llevan un borde y una sombra suave del color del tema
    (se nota el cambio aunque las tarjetas sigan blancas) */
 [data-tema] .card-light.rounded-xl {

@@ -1,6 +1,6 @@
 -- =====================================================================
--- VerdeTrack · PASO 9: Varios códigos de barras por producto
--- productos.codigo_barras sigue siendo el código PRINCIPAL (web, reportes, importador).
+-- VerdeTrack · PASO 8: Varios códigos de barras por producto
+-- productos.codigo_barras sigue siendo el código PRINCIPAL (reportes, importador).
 -- La tabla codigos_barras guarda los códigos ADICIONALES (sin límite).
 -- Un mismo código nunca puede pertenecer a dos productos (lo controla la base).
 -- =====================================================================

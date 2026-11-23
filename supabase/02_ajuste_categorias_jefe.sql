@@ -1,4 +1,4 @@
--- VerdeTrack · PASO 1b: ajuste de categorías y permiso del Jefe
+-- VerdeTrack · PASO 2: ajuste de categorías y permiso del Jefe
 begin;
 
 -- Quita la política vieja (con tilde) que daba acceso a cualquier usuario con sesión

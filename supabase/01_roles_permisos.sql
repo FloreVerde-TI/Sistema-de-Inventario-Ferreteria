@@ -1,5 +1,5 @@
 -- =====================================================================
--- VerdeTrack · PASO 1: roles, permisos, perfiles, bitácora y configuración
+-- VerdeTrack · PASO 1: roles, permisos, perfiles y configuración
 -- Correr TODO de una vez en Supabase → SQL Editor → Run.
 -- Está dentro de begin/commit: si algo falla, NO se aplica nada.
 -- =====================================================================
@@ -25,17 +25,17 @@ create table if not exists public.roles (
 insert into public.roles (nombre, descripcion, nivel, es_super, es_sistema, permisos) values
 ('Super Administrador', 'Desarrolladores del sistema. Acceso total.', 100, true, true,
   array['productos_crear','productos_editar','productos_deshabilitar','productos_eliminar',
-        'entradas','salidas','pedidos_revisar','pedidos_reabrir','reportes',
-        'usuarios_gestionar','roles_gestionar','config_editar','bitacora_ver']),
+        'entradas','salidas','reportes',
+        'usuarios_gestionar','roles_gestionar','config_editar']),
 ('Administrador', 'Dueño de la empresa. Todo lo del negocio.', 80, false, true,
   array['productos_crear','productos_editar','productos_deshabilitar','productos_eliminar',
-        'entradas','salidas','pedidos_revisar','pedidos_reabrir','reportes',
-        'usuarios_gestionar','roles_gestionar','config_editar','bitacora_ver']),
+        'entradas','salidas','reportes',
+        'usuarios_gestionar','roles_gestionar','config_editar']),
 ('Jefe', 'Encargado de operaciones.', 60, false, true,
   array['productos_crear','productos_editar','productos_deshabilitar',
-        'entradas','salidas','pedidos_revisar','pedidos_reabrir','reportes','bitacora_ver']),
+        'entradas','salidas','reportes']),
 ('Empleado', 'Operación diaria.', 20, false, true,
-  array['entradas','salidas','pedidos_revisar','reportes'])
+  array['entradas','salidas','reportes'])
 on conflict (nombre) do nothing;
 
 -- ---------------------------------------------------------------------
@@ -168,50 +168,7 @@ create policy "Perfiles: gestores ven todos" on public.profiles
 -- Crear/editar/desactivar perfiles se hace desde la ruta del servidor (no desde el navegador).
 
 -- ---------------------------------------------------------------------
--- 6) BITÁCORA de actividad
--- El usuario ("Nombre — Rol") lo pone la base de datos, no el navegador.
--- ---------------------------------------------------------------------
-create table if not exists public.actividad (
-  id bigint generated always as identity primary key,
-  usuario_id uuid references auth.users(id) on delete set null,
-  usuario text,
-  accion text not null,      -- crear, editar, deshabilitar, habilitar, eliminar, aprobar, rechazar, reabrir...
-  entidad text not null,     -- producto, pedido, usuario, rol, configuracion
-  entidad_id text,
-  detalle text,
-  created_at timestamptz not null default now()
-);
-create index if not exists actividad_created_at_idx on public.actividad (created_at desc);
-
-create or replace function public.actividad_completar_usuario()
-returns trigger language plpgsql security definer set search_path = public as $$
-begin
-  if auth.uid() is not null then
-    new.usuario_id := auth.uid();
-    select pr.full_name || ' — ' || pr.role into new.usuario
-    from public.profiles pr where pr.id = auth.uid();
-  end if;
-  new.usuario := coalesce(new.usuario, 'Sistema');
-  new.created_at := now();
-  return new;
-end $$;
-
-drop trigger if exists tr_actividad_usuario on public.actividad;
-create trigger tr_actividad_usuario
-  before insert on public.actividad
-  for each row execute function public.actividad_completar_usuario();
-
-alter table public.actividad enable row level security;
-drop policy if exists "Actividad: registrar" on public.actividad;
-drop policy if exists "Actividad: ver" on public.actividad;
-create policy "Actividad: registrar" on public.actividad
-  for insert to authenticated with check (auth.uid() is not null);
-create policy "Actividad: ver" on public.actividad
-  for select to authenticated using (public.tiene_permiso('bitacora_ver'));
--- Sin políticas de editar/borrar: la bitácora no se puede alterar.
-
--- ---------------------------------------------------------------------
--- 7) CONFIGURACIÓN (settings)
+-- 6) CONFIGURACIÓN (settings)
 -- ---------------------------------------------------------------------
 do $$
 begin
@@ -230,8 +187,8 @@ alter table public.settings
   add column if not exists logo_url text,
   add column if not exists pie_reportes text;
 
-insert into public.settings (id, business_name, nombre_comercial, sitio_web)
-select 1, 'Flore Verde SRL', 'Flore Verde', 'https://web-floreverde.vercel.app/'
+insert into public.settings (id, business_name, nombre_comercial)
+select 1, 'Flore Verde SRL', 'Flore Verde'
 where not exists (select 1 from public.settings);
 
 alter table public.settings enable row level security;
@@ -245,8 +202,7 @@ create policy "Config: editar" on public.settings
   with check (public.tiene_permiso('config_editar'));
 
 -- ---------------------------------------------------------------------
--- 8) SEGURIDAD de categorías (nota 7): quitar la temporal sin cuenta
--- La lectura pública se mantiene (la web la necesita).
+-- 7) SEGURIDAD de categorías: quitar la política temporal sin cuenta
 -- ---------------------------------------------------------------------
 drop policy if exists "dev_all_categorias_insert" on public.categorias;
 drop policy if exists "Admin: Gestión total de categorias" on public.categorias;
@@ -278,5 +234,5 @@ select p.full_name, p.email, p.role, p.activo from public.profiles p;
 -- B)
 select tablename, policyname, cmd
 from pg_policies
-where schemaname = 'public' and tablename in ('categorias','roles','profiles','settings','actividad')
+where schemaname = 'public' and tablename in ('categorias','roles','profiles','settings')
 order by tablename, policyname;

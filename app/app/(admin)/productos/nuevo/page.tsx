@@ -5,13 +5,12 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
-import { etiquetaUsuario, registrarActividad } from '@/lib/actividad';
+import { etiquetaUsuario } from '@/lib/usuario';
 import SubirImagen from '@/components/SubirImagen';
 import ElegirPlantilla from '@/components/ElegirPlantilla';
 import { imagenPredeterminada } from '@/lib/plantillas';
-import { useDefensa } from '@/lib/defensa';
 import { Category } from '@/types';
-import { Save, X, Loader2, Package, Globe, CheckCircle2 } from 'lucide-react';
+import { Save, X, Loader2, Package, CheckCircle2 } from 'lucide-react';
 import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
@@ -33,7 +32,6 @@ interface FormState {
   stock_minimo: string;
   ubicacion: string;
   imagen: string;
-  enWeb: boolean;
 }
 
 const NEW_CATEGORY = '__nueva__';
@@ -55,7 +53,6 @@ const EMPTY_FORM: FormState = {
   stock_minimo: '5',
   ubicacion: '',
   imagen: '',
-  enWeb: true,
 };
 
 const CARD = 'card-light bg-surface border border-border rounded-xl shadow-sm';
@@ -84,7 +81,6 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function NuevoProductoForm() {
   const codigoInicial = useSearchParams().get('codigo') ?? '';
 
-  const defensa = useDefensa();
   const [form, setForm] = useState<FormState>({ ...EMPTY_FORM, codigo_barras: codigoInicial });
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [proveedores, setProveedores] = useState<ProveedorRow[]>([]);
@@ -237,7 +233,6 @@ function NuevoProductoForm() {
           stock_minimo: minimo,
           ubicacion: form.ubicacion.trim() || null,
           imagen_principal: imagenFinal || null,
-          activo: form.enWeb,
         })
         .select('id')
         .single();
@@ -255,15 +250,6 @@ function NuevoProductoForm() {
         }
       }
 
-      // Bitácora
-      await registrarActividad({
-        accion: 'crear',
-        entidad: 'producto',
-        entidad_id: productoId,
-        detalle: `Creó el producto "${nombre}"${stock > 0 ? ` con stock inicial ${stock}` : ''}${
-          extras.length > 0 ? ` y ${extras.length} código(s) de barras adicional(es)` : ''
-        }`,
-      });
 
       // 4. Stock inicial como entrada (el trigger suma el stock)
       if (stock > 0) {
@@ -462,7 +448,7 @@ function NuevoProductoForm() {
                     className={`${FIELD} h-24 resize-none`}
                     value={form.descripcion}
                     onChange={(e) => set('descripcion', e.target.value)}
-                    placeholder="Detalles del producto (se muestra también en la web)"
+                    placeholder="Detalles del producto"
                   />
                 </div>
               </div>
@@ -581,29 +567,6 @@ function NuevoProductoForm() {
                 </button>
               )}
             </div>
-
-            {/* Modo defensa: se oculta la publicación en la web */}
-            {!defensa && (
-            <div className={`${CARD} p-6`}>
-              <SectionTitle>Publicación</SectionTitle>
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 accent-primary"
-                  checked={form.enWeb}
-                  onChange={(e) => set('enWeb', e.target.checked)}
-                />
-                <span>
-                  <span className="flex items-center gap-2 text-sm font-semibold text-text">
-                    <Globe size={16} /> Disponible en la web
-                  </span>
-                  <span className="block text-xs text-text-muted mt-0.5">
-                    Si está activo, el producto aparece en la página promocional.
-                  </span>
-                </span>
-              </label>
-            </div>
-            )}
 
             <button
               type="submit"

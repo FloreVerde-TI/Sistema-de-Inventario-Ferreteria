@@ -3,8 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminLayout, { usePerfil, Permiso, PerfilSesion, Tienda } from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
-import { registrarActividad } from '@/lib/actividad';
-import { useDefensa, defensaActiva } from '@/lib/defensa';
 import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 import {
   UserPlus,
@@ -50,7 +48,6 @@ const GRUPOS_PERMISOS: { grupo: string; items: { key: Permiso; label: string }[]
       { key: 'productos_editar', label: 'Editar productos' },
       { key: 'productos_deshabilitar', label: 'Habilitar / deshabilitar' },
       { key: 'productos_eliminar', label: 'Eliminar productos' },
-      { key: 'promociones', label: 'Ofertas, descuentos y paquetes' },
     ],
   },
   {
@@ -62,20 +59,11 @@ const GRUPOS_PERMISOS: { grupo: string; items: { key: Permiso; label: string }[]
     ],
   },
   {
-    grupo: 'Pedidos y cotizaciones web',
-    items: [
-      { key: 'pedidos_revisar', label: 'Aprobar o rechazar' },
-      { key: 'pedidos_reabrir', label: 'Reabrir pedidos' },
-      { key: 'cotizaciones', label: 'Ver y responder cotizaciones' },
-    ],
-  },
-  {
     grupo: 'Administración',
     items: [
       { key: 'usuarios_gestionar', label: 'Gestionar usuarios' },
       { key: 'roles_gestionar', label: 'Gestionar roles' },
       { key: 'config_editar', label: 'Editar configuración' },
-      { key: 'bitacora_ver', label: 'Ver bitácora' },
     ],
   },
 ];
@@ -713,7 +701,7 @@ function EliminarModal({
       <div className="p-5 space-y-4">
         <p className="text-sm text-text-soft">
           Se eliminará la cuenta de <strong className="text-text">{usuario.full_name}</strong> ({usuario.email}). Su historial
-          ({defensaActiva() ? 'movimientos y bitácora' : 'movimientos, pedidos y bitácora'}) se conserva con su nombre.
+          (movimientos y bitácora) se conserva con su nombre.
         </p>
         <p className="text-sm text-text-soft">
           Si solo se ausentará un tiempo, es mejor <strong className="text-text">desactivarlo</strong> con el botón de encendido.
@@ -755,7 +743,6 @@ function RolModal({
   onGuardado: (msg: string) => void;
 }) {
   const nivelMax = perfil.nivel - 1;
-  const defensa = useDefensa(); // modo defensa: sin permisos de la web
   const [nombre, setNombre] = useState(rol?.nombre ?? '');
   const [descripcion, setDescripcion] = useState(rol?.descripcion ?? '');
   const [nivel, setNivel] = useState(String(rol?.nivel ?? Math.min(30, nivelMax)));
@@ -796,12 +783,6 @@ function RolModal({
       setGuardando(null);
       return;
     }
-    await registrarActividad({
-      accion: rol ? 'editar' : 'crear',
-      entidad: 'rol',
-      entidad_id: data[0].id as string,
-      detalle: `${rol ? 'Editó' : 'Creó'} el rol ${limpio} (nivel ${n}, ${permisos.length} permisos)`,
-    });
     onGuardado(rol ? `Se actualizó el rol ${limpio}.` : `Se creó el rol ${limpio}.`);
   }
 
@@ -827,14 +808,6 @@ function RolModal({
         return;
       }
     }
-    if (usuariosDelRol.length > 0) {
-      await registrarActividad({
-        accion: 'editar',
-        entidad: 'rol',
-        entidad_id: rol.id,
-        detalle: `Pasó ${usuariosDelRol.length} usuario(s) del rol ${rol.nombre} al rol ${destino}`,
-      });
-    }
 
     // 2. Borrar el rol
     const { data, error: err } = await supabase.from('roles').delete().eq('id', rol.id).select('id');
@@ -844,7 +817,6 @@ function RolModal({
       setConfirmarBorrar(false);
       return;
     }
-    await registrarActividad({ accion: 'eliminar', entidad: 'rol', entidad_id: rol.id, detalle: `Eliminó el rol ${rol.nombre}` });
     onGuardado(`Se eliminó el rol ${rol.nombre}.`);
   }
 
@@ -878,7 +850,7 @@ function RolModal({
 
         <div className="space-y-3">
           <p className={LABEL}>Permisos</p>
-          {GRUPOS_PERMISOS.filter((g) => !(defensa && g.grupo.includes('web'))).map((g) => (
+          {GRUPOS_PERMISOS.map((g) => (
             <div key={g.grupo} className="border border-border rounded-lg p-3">
               <p className="text-xs font-semibold text-text mb-2">{g.grupo}</p>
               <div className="grid grid-cols-2 gap-2">
@@ -900,7 +872,7 @@ function RolModal({
               </div>
             </div>
           ))}
-          <p className="text-xs text-text-muted">Todos pueden ver Dashboard, Productos, Movimientos{defensa ? '' : ', Pedidos'} y Código de barras.</p>
+          <p className="text-xs text-text-muted">Todos pueden ver Dashboard, Productos, Movimientos y Código de barras.</p>
         </div>
 
         {rol && !rol.es_sistema && enUso > 0 && (

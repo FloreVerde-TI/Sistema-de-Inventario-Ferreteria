@@ -4,8 +4,6 @@ import React, { Suspense, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import AdminLayout, { usePerfil, Permiso } from '@/components/AdminLayout';
 import { MensajeTema } from '@/components/Tematica';
-import TarjetaCotizaciones from '@/components/TarjetaCotizaciones';
-import { useDefensa } from '@/lib/defensa';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { Product } from '@/types';
@@ -14,14 +12,13 @@ import {
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import {
-  Package, AlertTriangle, Ban, ArrowDownCircle, ArrowUpCircle, ShoppingCart,
+  Package, AlertTriangle, Ban, ArrowDownCircle, ArrowUpCircle,
   CalendarDays, Plus, ScanLine, ChevronDown,
 } from 'lucide-react';
 
 /* ---------- Tipos ---------- */
 type ProductRow = Pick<Product, 'categoria_id' | 'stock' | 'stock_minimo' | 'habilitado'>;
 type MovementRow = { tipo: string; cantidad: number; created_at: string };
-type PedidoRow = { estado: string | null; fecha: string };
 type CategoryRow = { id: string; nombre: string };
 
 type RangeKey = 'hoy' | '7d' | '15d' | '30d' | '90d' | 'anio' | 'custom';
@@ -32,21 +29,17 @@ type BucketDef = { key: string; label: string };
 
 type Snapshot = { totalProducts: number; lowStock: number; outOfStock: number };
 type MovPoint = { label: string; Entrada: number; Salida: number };
-type PedPoint = { label: string; Pendiente: number; Aprobado: number; Rechazado: number };
 type CategorySlice = { name: string; value: number; color: string };
 type RangeData = {
   movChart: MovPoint[];
-  pedChart: PedPoint[];
   entries: number;
   exits: number;
-  pedidos: number;
-  pendientes: number;
   granularity: Granularity;
 };
 
 const EMPTY_SNAPSHOT: Snapshot = { totalProducts: 0, lowStock: 0, outOfStock: 0 };
 const EMPTY_RANGE_DATA: RangeData = {
-  movChart: [], pedChart: [], entries: 0, exits: 0, pedidos: 0, pendientes: 0, granularity: 'day',
+  movChart: [], entries: 0, exits: 0, granularity: 'day',
 };
 
 const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
@@ -169,13 +162,6 @@ function granularityDays(r: Range): number {
   return Math.round((startOfDay(r.end).getTime() - r.start.getTime()) / 86400000) + 1;
 }
 
-function normEstado(estado: string | null): 'Pendiente' | 'Aprobado' | 'Rechazado' {
-  const e = (estado ?? '').trim().toLowerCase();
-  if (e === 'aprobado') return 'Aprobado';
-  if (e === 'rechazado') return 'Rechazado';
-  return 'Pendiente';
-}
-
 const kindOf = (m: MovementRow) => m.tipo.toLowerCase();
 
 function buildMovChart(movs: MovementRow[], buckets: BucketDef[], g: Granularity): MovPoint[] {
@@ -185,15 +171,6 @@ function buildMovChart(movs: MovementRow[], buckets: BucketDef[], g: Granularity
     if (!p) continue;
     if (kindOf(m) === 'entrada') p.Entrada += Math.abs(m.cantidad);
     if (kindOf(m) === 'salida') p.Salida += Math.abs(m.cantidad);
-  }
-  return [...map.values()];
-}
-
-function buildPedChart(peds: PedidoRow[], buckets: BucketDef[], g: Granularity): PedPoint[] {
-  const map = new Map(buckets.map((b) => [b.key, { label: b.label, Pendiente: 0, Aprobado: 0, Rechazado: 0 }]));
-  for (const p of peds) {
-    const point = map.get(bucketKey(new Date(p.fecha), g));
-    if (point) point[normEstado(p.estado)] += 1;
   }
   return [...map.values()];
 }
@@ -249,10 +226,6 @@ export default function DashboardCliente() {
 }
 
 function DashboardContent() {
-  const { puede } = usePerfil();
-  const veCotizaciones = puede('cotizaciones');
-  // Modo defensa: sin pedidos ni cotizaciones web
-  const defensa = useDefensa();
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
   const [slices, setSlices] = useState<CategorySlice[]>([]);
   const [snapLoading, setSnapLoading] = useState(true);
@@ -307,7 +280,7 @@ function DashboardContent() {
     };
   }, []);
 
-  // Movimientos y pedidos del rango elegido
+  // Movimientos del rango elegido
   useEffect(() => {
     let cancelled = false;
     async function loadRange() {
@@ -315,31 +288,23 @@ function DashboardContent() {
       try {
         const from = range.start.toISOString();
         const to = range.end.toISOString();
-        const [movs, peds] = await Promise.all([
-          fetchAll<MovementRow>((a, b) =>
-            supabase
-              .from('movimientos')
-              .select('tipo, cantidad, created_at')
-              .gte('created_at', from)
-              .lte('created_at', to)
-              .order('created_at')
-              .range(a, b)
-          ),
-          fetchAll<PedidoRow>((a, b) =>
-            supabase.from('pedidos').select('estado, fecha').gte('fecha', from).lte('fecha', to).order('fecha').range(a, b)
-          ),
-        ]);
+        const movs = await fetchAll<MovementRow>((a, b) =>
+          supabase
+            .from('movimientos')
+            .select('tipo, cantidad, created_at')
+            .gte('created_at', from)
+            .lte('created_at', to)
+            .order('created_at')
+            .range(a, b)
+        );
         if (cancelled) return;
 
         const g = granularityOf(range);
         const buckets = buildBuckets(range, g);
         setData({
           movChart: buildMovChart(movs, buckets, g),
-          pedChart: buildPedChart(peds, buckets, g),
           entries: movs.filter((m) => kindOf(m) === 'entrada').length,
           exits: movs.filter((m) => kindOf(m) === 'salida').length,
-          pedidos: peds.length,
-          pendientes: peds.filter((p) => normEstado(p.estado) === 'Pendiente').length,
           granularity: g,
         });
         setError(null);
@@ -381,7 +346,6 @@ function DashboardContent() {
   const grouping =
     data.granularity === 'hour' ? 'por hora' : data.granularity === 'month' ? 'por mes' : 'por día';
   const hasMovements = data.movChart.some((d) => d.Entrada > 0 || d.Salida > 0);
-  const hasPedidos = data.pedChart.some((d) => d.Pendiente + d.Aprobado + d.Rechazado > 0);
 
   return (
     <AdminLayout>
@@ -455,21 +419,12 @@ function DashboardContent() {
         )}
 
         {/* KPIs */}
-        <div className={`grid grid-cols-1 md:grid-cols-3 gap-4 ${defensa ? 'lg:grid-cols-5' : 'lg:grid-cols-6'}`}>
+        <div className={`grid grid-cols-1 md:grid-cols-3 gap-4 lg:grid-cols-5`}>
           <KpiCard icon={<Package size={20} />} label="Total productos" hint="Actual" value={snap(snapshot.totalProducts)} color="blue" />
           <KpiCard icon={<AlertTriangle size={20} />} label="Stock bajo" hint="Actual" value={snap(snapshot.lowStock)} color="amber" />
           <KpiCard icon={<Ban size={20} />} label="Agotados" hint="Actual" value={snap(snapshot.outOfStock)} color="red" />
           <KpiCard icon={<ArrowDownCircle size={20} />} label="Entradas" hint={range.label} value={inRange(data.entries)} color="green" />
           <KpiCard icon={<ArrowUpCircle size={20} />} label="Salidas" hint={range.label} value={inRange(data.exits)} color="cyan" />
-          {!defensa && (
-            <KpiCard
-              icon={<ShoppingCart size={20} />}
-              label="Pedidos web"
-              hint={rangeLoading ? range.label : `${range.label} · ${data.pendientes} pendientes`}
-              value={inRange(data.pedidos)}
-              color="blue"
-            />
-          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -526,45 +481,6 @@ function DashboardContent() {
           </div>
         </div>
 
-        {!defensa && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Pedidos web */}
-        <div className={`p-6 ${CARD} ${veCotizaciones ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
-          <div className="mb-6 flex items-start justify-between gap-4">
-            <div>
-              <h3 className="font-semibold text-text">Pedidos web</h3>
-              <p className="text-xs text-text-muted">
-                Cantidad de pedidos por estado · {range.label}, {grouping}
-              </p>
-            </div>
-            <Link href="/pedidos" className="text-xs font-semibold text-primary-ink hover:underline">
-              Ver pedidos
-            </Link>
-          </div>
-          <div className="h-72 w-full">
-            {hasPedidos ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.pedChart}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="label" tick={{ fill: '#475569', fontSize: 12 }} tickLine={false} axisLine={false} />
-                  <YAxis allowDecimals={false} tick={{ fill: '#475569', fontSize: 12 }} tickLine={false} axisLine={false} />
-                  <Tooltip cursor={{ fill: '#f8fafc' }} />
-                  <Legend verticalAlign="top" align="right" height={36} />
-                  <Bar dataKey="Pendiente" stackId="p" fill="#f59e0b" />
-                  <Bar dataKey="Aprobado" stackId="p" fill="#10b981" />
-                  <Bar dataKey="Rechazado" stackId="p" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyState text={rangeLoading ? 'Cargando...' : 'No hay pedidos web en este rango.'} />
-            )}
-          </div>
-        </div>
-
-        {/* Cotizaciones nuevas (solo quien puede verlas) */}
-        <TarjetaCotizaciones />
-        </div>
-        )}
       </div>
     </AdminLayout>
   );

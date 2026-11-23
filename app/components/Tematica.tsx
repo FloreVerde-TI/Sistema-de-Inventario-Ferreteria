@@ -120,11 +120,12 @@ export function DecoracionTema({ tienda }: { tienda?: string }) {
 /** Botón ✨ junto al sol/luna: enciende o apaga la temática (solo se ve si hay una). */
 export function BotonTema() {
   const { tema, encendido, prueba, deFecha } = useTema();
-  const posible = tema ?? deFecha;
-  if (!posible && !prueba) return null;
 
-  const activo = !!tema;
-  const nombre = (tema ?? deFecha)?.nombre ?? 'temporada';
+  // Siempre visible para todos: enciende o apaga las temáticas en este navegador.
+  // Si hoy no hay fecha festiva, queda guardado y se aplica sola cuando llegue.
+  const activo = prueba ? !!tema : encendido;
+  const nombre = (tema ?? deFecha)?.nombre;
+  const texto = nombre ? `Temática de ${nombre}` : 'Temáticas de temporada';
   return (
     <button
       type="button"
@@ -133,13 +134,18 @@ export function BotonTema() {
           cambiarPrueba('');
           cambiarEncendido(false);
         } else {
+          cambiarPrueba('');
           cambiarEncendido(true);
         }
       }}
       className={`p-2 transition-colors ${activo ? 'text-primary' : 'text-text-muted hover:text-text'}`}
-      title={activo ? `Temática de ${nombre}: encendida (clic para apagar)` : `Temática de ${nombre}: apagada (clic para encender)`}
-      aria-label={activo ? 'Apagar temática de temporada' : 'Encender temática de temporada'}
-      aria-pressed={activo && encendido}
+      title={
+        activo
+          ? `${texto}: encendidas (clic para apagar)${nombre ? '' : '. Se activan solas en fechas festivas'}`
+          : `${texto}: apagadas (clic para encender)`
+      }
+      aria-label={activo ? 'Apagar temáticas de temporada' : 'Encender temáticas de temporada'}
+      aria-pressed={activo}
     >
       <Sparkles size={20} />
     </button>

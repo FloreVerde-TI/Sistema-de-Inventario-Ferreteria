@@ -5,10 +5,7 @@ import { useRouter } from 'next/navigation';
 import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
-import { etiquetaUsuario } from '@/lib/actividad';
-import { AdjuntarDocumento, VerDocumento } from '@/components/Documento';
-import { subirDocumento } from '@/lib/documentos';
-import { defensaActiva } from '@/lib/defensa';
+import { etiquetaUsuario } from '@/lib/usuario';
 import { Product, Movimiento } from '@/types';
 import { Loader2, ArrowUpCircle, ScanLine } from 'lucide-react';
 import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
@@ -17,7 +14,7 @@ type ProductOption = Pick<Product, 'id' | 'sku' | 'nombre' | 'stock' | 'habilita
 type SalidaRow = Pick<
   Movimiento,
   'id' | 'producto_id' | 'cantidad' | 'motivo' | 'usuario' | 'referencia' | 'observaciones' | 'created_at'
-> & { documento_path: string | null };
+>;
 
 type FormState = {
   producto_id: string;
@@ -73,8 +70,6 @@ export default function SalidasPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  // Foto o PDF de la factura / comprobante (opcional)
-  const [documento, setDocumento] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   useLimpiarAlSalir(setError, setSuccess); // avisos fuera al volver a la pantalla
@@ -89,10 +84,8 @@ export default function SalidasPage() {
       ),
       supabase
         .from('movimientos')
-        .select('id, producto_id, cantidad, motivo, usuario, referencia, observaciones, documento_path, created_at')
+        .select('id, producto_id, cantidad, motivo, usuario, referencia, observaciones, created_at')
         .eq('tipo', 'salida')
-        // Modo defensa: sin movimientos de la página web
-        .or(defensaActiva() ? 'origen.is.null,origen.neq.web' : 'id.not.is.null')
         .gte('created_at', since)
         .order('created_at', { ascending: false })
         .limit(50),
@@ -153,7 +146,8 @@ export default function SalidasPage() {
       setError('La cantidad debe ser un número entero mayor que 0.');
       return;
     }
-    // La base de datos resta sin revisar, así que se valida aquí para no dejar stock negativo
+    // La base de datos no deja el stock en negativo (regla stock >= 0); aquí se revisa antes
+    // para mostrar un mensaje claro en lugar del error de la base
     if (cantidad > (product.stock ?? 0)) {
       setError(`No hay stock suficiente: "${product.nombre}" tiene ${product.stock ?? 0} unidades.`);
       return;
@@ -165,18 +159,6 @@ export default function SalidasPage() {
     const usuario = await etiquetaUsuario();
 
     // cantidad siempre positiva: el trigger resta el stock cuando tipo no es 'entrada'
-    // Documento adjunto: se sube primero para guardar su ruta en el movimiento
-    let documentoPath: string | null = null;
-    if (documento) {
-      try {
-        documentoPath = await subirDocumento(documento, 'salida');
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'No se pudo subir el documento.');
-        setSaving(false);
-        return;
-      }
-    }
-
     const { error: insertError } = await supabase.from('movimientos').insert({
       producto_id: form.producto_id,
       tipo: 'salida',
@@ -186,7 +168,6 @@ export default function SalidasPage() {
       usuario,
       origen: 'panel',
       observaciones: form.observaciones.trim() || null,
-      documento_path: documentoPath,
     });
 
     if (insertError) {
@@ -195,7 +176,6 @@ export default function SalidasPage() {
     } else {
       setSuccess('Salida registrada correctamente.');
       setForm(EMPTY_FORM);
-      setDocumento(null);
       await loadData();
     }
     setSaving(false);
@@ -313,10 +293,6 @@ export default function SalidasPage() {
               </span>
             </div>
 
-            <div className="sm:col-span-2 flex flex-col gap-1.5">
-              <label className={LABEL}>Foto de la factura o comprobante (opcional)</label>
-              <AdjuntarDocumento archivo={documento} onChange={setDocumento} />
-            </div>
           </div>
 
           <div className="flex justify-end gap-3 mt-6 pt-5 border-t border-border">
@@ -324,7 +300,6 @@ export default function SalidasPage() {
               type="button"
               onClick={() => {
                 setForm(EMPTY_FORM);
-                setDocumento(null);
                 setError(null);
                 setSuccess(null);
               }}
@@ -388,12 +363,7 @@ export default function SalidasPage() {
                         </td>
                         <td className={`${TD} text-right font-semibold text-danger`}>−{m.cantidad}</td>
                         <td className={`${TD} text-text-soft`}>
-                          {m.referencia || (m.documento_path ? '' : '—')}
-                          {m.documento_path && (
-                            <div>
-                              <VerDocumento ruta={m.documento_path} />
-                            </div>
-                          )}
+                          {m.referencia || '—'}
                         </td>
                         <td className={`${TD} text-text-soft`}>{m.usuario || '—'}</td>
                       </tr>

@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, X, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { registrarActividad } from '@/lib/actividad';
 
 type Codigo = { id: string; codigo: string };
 
@@ -16,11 +15,9 @@ function mensaje(e: { message: string; code?: string }): string {
 /** Códigos de barras ADICIONALES de un producto (se guardan al instante). */
 export default function CodigosAdicionales({
   productoId,
-  nombreProducto,
   codigoPrincipal,
 }: {
   productoId: string;
-  nombreProducto: string;
   codigoPrincipal: string;
 }) {
   const [codigos, setCodigos] = useState<Codigo[]>([]);
@@ -67,12 +64,6 @@ export default function CodigosAdicionales({
     if (e) return setError(mensaje(e));
     setCodigos((prev) => [...prev, data as Codigo]);
     setNuevo('');
-    await registrarActividad({
-      accion: 'editar',
-      entidad: 'producto',
-      entidad_id: productoId,
-      detalle: `Agregó el código de barras ${codigo} a "${nombreProducto}"`,
-    });
   }
 
   async function quitar(c: Codigo) {
@@ -80,12 +71,6 @@ export default function CodigosAdicionales({
     const { error: e } = await supabase.from('codigos_barras').delete().eq('id', c.id);
     if (e) return setError(e.message);
     setCodigos((prev) => prev.filter((x) => x.id !== c.id));
-    await registrarActividad({
-      accion: 'editar',
-      entidad: 'producto',
-      entidad_id: productoId,
-      detalle: `Quitó el código de barras ${c.codigo} de "${nombreProducto}"`,
-    });
   }
 
   return (

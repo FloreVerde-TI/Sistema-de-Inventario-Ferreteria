@@ -152,17 +152,15 @@ export function BotonTema() {
   );
 }
 
-/** TEMPORAL: selector para ver cada tema sin esperar la fecha (solo Super Administrador). */
-export function ProbarTemas() {
+/** Selector para ver cada temática sin esperar la fecha (va en Configuración, solo Super Administrador). */
+export function SelectorTema({ className }: { className?: string }) {
   const { prueba } = useTema();
   return (
-    <div className="hidden md:flex fixed left-3 bottom-20 z-50 card-light bg-surface border border-border rounded-full shadow-md pl-3 pr-1 py-1 items-center gap-2 text-xs">
-      <span className="font-semibold text-text-soft">🎨 Probar tema</span>
+    <div>
       <select
-        className="bg-bg border border-border rounded-full px-2 py-1 text-xs text-text outline-none"
+        className={className}
         value={prueba}
         onChange={(e) => cambiarPrueba(e.target.value as '' | 'ninguno' | TemaId)}
-        title="Temporal: solo para probar cómo se ve cada temática"
       >
         <option value="">Automático (según la fecha)</option>
         <option value="ninguno">Sin tema</option>

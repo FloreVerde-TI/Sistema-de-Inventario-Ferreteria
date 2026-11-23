@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import AdminLayout from '@/components/AdminLayout';
+import AdminLayout, { usePerfil } from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { borrarImagenSiEsNuestra } from '@/lib/imagenes';
 import SubirImagen from '@/components/SubirImagen';
 import GestionCatalogos from '@/components/GestionCatalogos';
-import { Building2, Package, FileText, Image as ImageIcon, Save, Loader2, X } from 'lucide-react';
+import { SelectorTema } from '@/components/Tematica';
+import { Building2, Package, FileText, Image as ImageIcon, Save, Loader2, X, Sparkles } from 'lucide-react';
 import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
 type Config = {
@@ -60,6 +61,22 @@ function aConfig(f: Fila): Config {
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('es-CR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+/** Temática de temporada: el Super Administrador puede ver cualquiera (para mostrarla o capacitar).
+ *  Los demás usuarios la ven solo según la fecha. Se guarda en este navegador. */
+function TemaSuperAdmin() {
+  const { perfil } = usePerfil();
+  if (!perfil?.esSuper) return null;
+  return (
+    <Seccion icon={Sparkles} titulo="Temática de temporada" sub="Solo Super Administrador · Los demás usuarios la ven según la fecha">
+      <label className={LABEL}>Ver temática</label>
+      <SelectorTema className={FIELD} />
+      <p className="text-xs text-text-muted mt-2">
+        Solo cambia en este navegador. Para volver a la normalidad, elige &quot;Automático (según la fecha)&quot;.
+      </p>
+    </Seccion>
+  );
 }
 
 function Seccion({
@@ -351,6 +368,8 @@ export default function ConfigPage() {
                 </div>
               </div>
             </Seccion>
+
+            <TemaSuperAdmin />
           </>
         )}
       </form>

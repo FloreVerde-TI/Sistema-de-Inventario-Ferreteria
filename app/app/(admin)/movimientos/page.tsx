@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import AdminLayout from '@/components/AdminLayout';
+import BuscarProducto from '@/components/BuscarProducto';
+import { useProductosBuscables } from '@/lib/buscables';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { Product, Movimiento } from '@/types';
@@ -9,7 +11,7 @@ import { exportReport, type Column, type Format } from '@/lib/exportar';
 import { Search, Download, ChevronDown, FileSpreadsheet, FileText, X, Loader2 } from 'lucide-react';
 import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
-type ProductName = Pick<Product, 'id' | 'nombre'>;
+type ProductName = Pick<Product, 'id' | 'nombre' | 'sku' | 'codigo_barras' | 'proveedor_id'>;
 type MovimientoRow = Pick<
   Movimiento,
   'id' | 'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
@@ -117,6 +119,7 @@ function filtersSummary(f: Filters, products: ProductName[]): string[] {
 
 export default function MovimientosPage() {
   const [products, setProducts] = useState<ProductName[]>([]);
+  const buscables = useProductosBuscables(products);
   const [rows, setRows] = useState<MovimientoRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -154,7 +157,7 @@ export default function MovimientosPage() {
   useEffect(() => {
     async function loadProducts() {
       const { data, error: prodError } = await traerTodo<ProductName>((a, b) =>
-        supabase.from('productos').select('id, nombre').order('nombre').order('id').range(a, b)
+        supabase.from('productos').select('id, nombre, sku, codigo_barras, proveedor_id').order('nombre').order('id').range(a, b)
       );
       if (prodError) {
         console.error('Error cargando productos:', prodError);
@@ -348,18 +351,14 @@ export default function MovimientosPage() {
             <option value="salida">Salida</option>
           </select>
 
-          <select
-            className={`${FIELD} max-w-[220px]`}
+          <BuscarProducto
+            className="w-full sm:w-64"
+            productos={buscables}
             value={draft.producto}
-            onChange={(e) => setDraftField('producto', e.target.value)}
-          >
-            <option value="all">Todos los productos</option>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => setDraftField('producto', id)}
+            valorTodos="all"
+            placeholder="Buscar producto…"
+          />
 
           <button
             type="button"

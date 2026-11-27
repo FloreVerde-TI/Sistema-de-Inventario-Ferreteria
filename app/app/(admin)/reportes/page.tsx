@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '@/components/AdminLayout';
+import BuscarProducto from '@/components/BuscarProducto';
+import { useProductosBuscables } from '@/lib/buscables';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { Product, Category, Movimiento } from '@/types';
@@ -20,7 +22,7 @@ type ProductRow = { proveedor_id: string | null } & Pick<
 >;
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
 type ProveedorRow = { id: string; nombre: string };
-type ProductName = Pick<Product, 'id' | 'nombre'>;
+type ProductName = Pick<Product, 'id' | 'nombre' | 'sku' | 'codigo_barras' | 'proveedor_id'>;
 type MovRow = Pick<
   Movimiento,
   'producto_id' | 'tipo' | 'cantidad' | 'motivo' | 'usuario' | 'proveedor' | 'referencia' | 'observaciones' | 'created_at'
@@ -272,7 +274,7 @@ export default function ReportesPage() {
     async function loadLists() {
       const [catRes, prodRes, provRes] = await Promise.all([
         supabase.from('categorias').select('id, nombre').order('nombre'),
-        traerTodo((a, b) => supabase.from('productos').select('id, nombre').order('nombre').order('id').range(a, b)),
+        traerTodo((a, b) => supabase.from('productos').select('id, nombre, sku, codigo_barras, proveedor_id').order('nombre').order('id').range(a, b)),
         supabase.from('proveedores').select('id, nombre').order('nombre'),
       ]);
       if (cancelled) return;
@@ -539,33 +541,33 @@ function MovFilters({
   onChange: (f: MovFilter) => void;
   products: ProductName[];
 }) {
+  const buscables = useProductosBuscables(products);
   return (
     <>
       <DateFields desde={value.desde} hasta={value.hasta} onChange={(desde, hasta) => onChange({ ...value, desde, hasta })} />
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className={LABEL}>Tipo</label>
-          <select
-            className={FIELD}
-            value={value.tipo}
-            onChange={(e) => onChange({ ...value, tipo: e.target.value as MovFilter['tipo'] })}
-          >
-            <option value="all">Todos</option>
-            <option value="entrada">Entrada</option>
-            <option value="salida">Salida</option>
-          </select>
-        </div>
-        <div>
-          <label className={LABEL}>Producto</label>
-          <select className={FIELD} value={value.producto} onChange={(e) => onChange({ ...value, producto: e.target.value })}>
-            <option value="all">Todos</option>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div>
+        <label className={LABEL}>Tipo</label>
+        <select
+          className={FIELD}
+          value={value.tipo}
+          onChange={(e) => onChange({ ...value, tipo: e.target.value as MovFilter['tipo'] })}
+        >
+          <option value="all">Todos</option>
+          <option value="entrada">Entrada</option>
+          <option value="salida">Salida</option>
+        </select>
+      </div>
+      {/* Producto en su propia fila: el buscador necesita espacio para la lista */}
+      <div>
+        <label className={LABEL}>Producto</label>
+        <BuscarProducto
+          productos={buscables}
+          value={value.producto}
+          onChange={(id) => onChange({ ...value, producto: id })}
+          valorTodos="all"
+          textoTodos="Todos los productos"
+          placeholder="Buscar producto…"
+        />
       </div>
       <p className="text-[11px] text-text-muted">Sin fechas se exporta todo el historial.</p>
     </>

@@ -58,7 +58,7 @@ export type PerfilSesion = {
   nivel: number;
   esSuper: boolean;
   permisos: string[];
-  /** "Nombre — Rol", para guardar en movimientos, bitácora, etc. */
+  /** "Nombre — Rol", para guardar en los movimientos. */
   etiqueta: string;
   /** Ferretería en la que está trabajando ahora */
   tienda: Tienda;

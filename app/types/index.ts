@@ -1,4 +1,4 @@
-// Tipos de la base de datos (actualizados con roles, configuración, bitácora y proveedores)
+// Tipos de la base de datos (actualizados con roles, configuración y proveedores)
 
 /** Nombre del rol. Ya no es una lista fija: los roles se crean desde Usuarios. */
 export type Role = string;

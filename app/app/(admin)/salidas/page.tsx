@@ -6,11 +6,13 @@ import AdminLayout from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import { traerTodo } from '@/lib/paginar';
 import { etiquetaUsuario } from '@/lib/usuario';
+import BuscarProducto from '@/components/BuscarProducto';
+import { useProductosBuscables } from '@/lib/buscables';
 import { Product, Movimiento } from '@/types';
 import { Loader2, ArrowUpCircle, ScanLine } from 'lucide-react';
 import { useLimpiarAlSalir } from '@/lib/limpiarAlSalir';
 
-type ProductOption = Pick<Product, 'id' | 'sku' | 'nombre' | 'stock' | 'habilitado'>;
+type ProductOption = Pick<Product, 'id' | 'sku' | 'nombre' | 'stock' | 'habilitado' | 'codigo_barras' | 'proveedor_id'>;
 type SalidaRow = Pick<
   Movimiento,
   'id' | 'producto_id' | 'cantidad' | 'motivo' | 'usuario' | 'referencia' | 'observaciones' | 'created_at'
@@ -80,7 +82,7 @@ export default function SalidasPage() {
 
     const [prodRes, salRes] = await Promise.all([
       traerTodo((a, b) =>
-        supabase.from('productos').select('id, sku, nombre, stock, habilitado').order('nombre').order('id').range(a, b)
+        supabase.from('productos').select('id, sku, nombre, stock, habilitado, codigo_barras, proveedor_id').order('nombre').order('id').range(a, b)
       ),
       supabase
         .from('movimientos')
@@ -119,6 +121,7 @@ export default function SalidasPage() {
 
   // Solo los habilitados se pueden usar; la lista completa sirve para mostrar nombres en el historial
   const enabledProducts = useMemo(() => products.filter((p) => p.habilitado !== false), [products]);
+  const buscables = useProductosBuscables(enabledProducts);
   const productName = useMemo(() => new Map(products.map((p) => [p.id, p.nombre])), [products]);
 
   const setField = (key: keyof FormState, value: string) => {
@@ -220,19 +223,12 @@ export default function SalidasPage() {
               <label className={LABEL}>
                 Producto <span className="text-danger">*</span>
               </label>
-              <select
-                className={FIELD}
+              <BuscarProducto
+                productos={buscables}
                 value={form.producto_id}
-                onChange={(e) => setField('producto_id', e.target.value)}
-              >
-                <option value="">Seleccionar producto…</option>
-                {enabledProducts.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.sku ? `${p.sku} · ` : ''}
-                    {p.nombre} (Stock: {p.stock ?? 0})
-                  </option>
-                ))}
-              </select>
+                onChange={(id) => setField('producto_id', id)}
+                mostrarStock
+              />
             </div>
 
             <div className="flex flex-col gap-1.5">

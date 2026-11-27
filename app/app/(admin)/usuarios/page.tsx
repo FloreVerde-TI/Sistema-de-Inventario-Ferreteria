@@ -701,7 +701,7 @@ function EliminarModal({
       <div className="p-5 space-y-4">
         <p className="text-sm text-text-soft">
           Se eliminará la cuenta de <strong className="text-text">{usuario.full_name}</strong> ({usuario.email}). Su historial
-          (movimientos y bitácora) se conserva con su nombre.
+          de movimientos se conserva con su nombre.
         </p>
         <p className="text-sm text-text-soft">
           Si solo se ausentará un tiempo, es mejor <strong className="text-text">desactivarlo</strong> con el botón de encendido.

@@ -3,17 +3,21 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Html5Qrcode } from 'html5-qrcode';
-import AdminLayout from '@/components/AdminLayout';
+import AdminLayout, { usePerfil } from '@/components/AdminLayout';
 import { supabase } from '@/lib/supabase';
 import SiPuede from '@/components/SiPuede';
+import BuscarProducto from '@/components/BuscarProducto';
+import { useProductosBuscables } from '@/lib/buscables';
+import { traerTodo } from '@/lib/paginar';
 import { Product, Category } from '@/types';
-import { ScanLine, Search, Package, ArrowDownCircle, ArrowUpCircle, X, Loader2, Plus } from 'lucide-react';
+import { ScanLine, Search, Package, ArrowDownCircle, ArrowUpCircle, X, Loader2, Plus, Link2 } from 'lucide-react';
 
 type ProductResult = Pick<
   Product,
   'id' | 'sku' | 'codigo_barras' | 'nombre' | 'categoria_id' | 'stock' | 'stock_minimo' | 'ubicacion' | 'imagen_principal' | 'habilitado'
 >;
 type CategoryRow = Pick<Category, 'id' | 'nombre'>;
+type ProductoLista = Pick<Product, 'id' | 'nombre' | 'sku' | 'codigo_barras' | 'proveedor_id'>;
 type StockStatus = 'normal' | 'low' | 'out';
 
 // Tarjeta blanca que se mantiene clara en modo oscuro (ver .card-light en globals.css)
@@ -64,6 +68,14 @@ export default function BarcodePage() {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState<string | null>(null); // código que no existe en la BD
   const [imgError, setImgError] = useState(false);
+  // Agregar un código desconocido como código adicional de un producto existente
+  const { puede } = usePerfil();
+  const [asignando, setAsignando] = useState(false);
+  const [listaProductos, setListaProductos] = useState<ProductoLista[]>([]);
+  const [destino, setDestino] = useState('');
+  const [guardandoCodigo, setGuardandoCodigo] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
+  const buscables = useProductosBuscables(listaProductos);
 
   // Categorías, para mostrar el nombre en el resultado
   useEffect(() => {
@@ -129,6 +141,9 @@ export default function BarcodePage() {
     setNotFound(null);
     setProduct(null);
     setImgError(false);
+    setAsignando(false);
+    setDestino('');
+    setAviso(null);
 
     let { data, error: queryError } = await supabase
       .from('productos')
@@ -247,6 +262,34 @@ export default function BarcodePage() {
     };
   }, [scanning, lookup]);
 
+  // Abre el buscador para elegir a qué producto se le agrega el código
+  const abrirAsignar = async () => {
+    setAsignando(true);
+    setDestino('');
+    if (listaProductos.length > 0) return;
+    const { data } = await traerTodo<ProductoLista>((a, b) =>
+      supabase.from('productos').select('id, nombre, sku, codigo_barras, proveedor_id').order('nombre').order('id').range(a, b)
+    );
+    setListaProductos(data ?? []);
+  };
+
+  // Guarda el código como adicional del producto elegido y lo muestra
+  const guardarCodigoAdicional = async () => {
+    if (!notFound || !destino) return;
+    setGuardandoCodigo(true);
+    setError(null);
+    const codigo = notFound;
+    const { error: e } = await supabase.from('codigos_barras').insert({ producto_id: destino, codigo });
+    setGuardandoCodigo(false);
+    if (e) {
+      setError(e.code === '23505' ? 'Ese código ya pertenece a otro producto.' : `No se pudo agregar el código: ${e.message}`);
+      return;
+    }
+    const nombre = listaProductos.find((p) => p.id === destino)?.nombre ?? 'el producto';
+    await lookup(codigo); // ahora sí lo encuentra
+    setAviso(`El código «${codigo}» se agregó a «${nombre}».`);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     lookup(code);
@@ -360,46 +403,85 @@ export default function BarcodePage() {
           <div className="bg-danger-soft text-danger border border-danger/30 rounded-lg p-4 text-sm">{error}</div>
         )}
 
-        {/* Código que no existe: ofrece registrarlo */}
+        {aviso && (
+          <div className="bg-success-soft text-success border border-success/30 rounded-lg p-4 text-sm">{aviso}</div>
+        )}
+
+        {/* Código que no existe: registrarlo como producto nuevo o agregarlo a uno existente */}
         {notFound && (
-          <div className={`${CARD} p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-text break-words">
-                No se encontró ningún producto con el código «{notFound}».
-              </p>
-              <SiPuede permiso="productos_crear">
-                <p className="text-sm text-text-muted mt-1">¿Registrar como nuevo producto?</p>
-              </SiPuede>
-            </div>
-            <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 sm:shrink-0">
-              <SiPuede
-                permiso="productos_crear"
-                sino={
-                  <button
-                    type="button"
-                    onClick={() => setNotFound(null)}
-                    className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors"
-                  >
-                    Cerrar
-                  </button>
-                }
-              >
+          <div className={`${CARD} p-4 sm:p-6 space-y-4`}>
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-text break-words">
+                  No se encontró ningún producto con el código «{notFound}».
+                </p>
+                {(puede('productos_crear') || puede('productos_editar')) && (
+                  <p className="text-sm text-text-muted mt-1">¿Qué desea hacer con este código?</p>
+                )}
+              </div>
+              <div className="flex flex-col-reverse lg:flex-row gap-2 lg:gap-3 lg:shrink-0">
                 <button
                   type="button"
-                  onClick={() => setNotFound(null)}
+                  onClick={() => {
+                    setNotFound(null);
+                    setAsignando(false);
+                  }}
                   className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors"
                 >
-                  Ahora no
+                  {puede('productos_crear') || puede('productos_editar') ? 'Ahora no' : 'Cerrar'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => router.push(`/productos/nuevo?codigo=${encodeURIComponent(notFound)}`)}
-                  className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center justify-center gap-2"
-                >
-                  <Plus size={16} /> Registrar como nuevo producto
-                </button>
-              </SiPuede>
+                <SiPuede permiso="productos_editar">
+                  <button
+                    type="button"
+                    onClick={abrirAsignar}
+                    className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Link2 size={16} /> Agregar a un producto existente
+                  </button>
+                </SiPuede>
+                <SiPuede permiso="productos_crear">
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/productos/nuevo?codigo=${encodeURIComponent(notFound)}`)}
+                    className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center justify-center gap-2"
+                  >
+                    <Plus size={16} /> Registrar como nuevo producto
+                  </button>
+                </SiPuede>
+              </div>
             </div>
+
+            {/* Elegir con la lupa el producto al que pertenece el código */}
+            {asignando && (
+              <div className="border-t border-border pt-4 space-y-3">
+                <label className="text-xs font-semibold text-text-soft block">¿A qué producto pertenece este código?</label>
+                <BuscarProducto productos={buscables} value={destino} onChange={setDestino} />
+                {destino && (
+                  <p className="text-sm text-text-soft">
+                    Se agregará el código <strong className="text-text">{notFound}</strong> como código adicional de{' '}
+                    <strong className="text-text">{listaProductos.find((p) => p.id === destino)?.nombre}</strong>.
+                  </p>
+                )}
+                <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setAsignando(false)}
+                    className="px-4 py-2 text-sm font-medium bg-surface border border-border rounded-lg hover:bg-bg transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!destino || guardandoCodigo}
+                    onClick={guardarCodigoAdicional}
+                    className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors shadow-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {guardandoCodigo ? <Loader2 className="animate-spin" size={16} /> : <Link2 size={16} />}
+                    Agregar código
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
